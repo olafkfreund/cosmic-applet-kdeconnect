@@ -27,17 +27,29 @@ This project follows the [Rust Code of Conduct](https://www.rust-lang.org/polici
    ```bash
    # NixOS users
    nix develop
-   
+
    # Or with shell.nix
    nix-shell
    ```
 
-3. **Build the project**
+3. **Install git hooks and setup environment**
+   ```bash
+   just setup
+   ```
+
+   This installs:
+   - rustfmt, clippy, and other Rust components
+   - Pre-commit hook (formats code, runs checks)
+   - Commit-msg hook (enforces conventional commits)
+
+   See [hooks/README.md](hooks/README.md) for details.
+
+4. **Build the project**
    ```bash
    just build
    ```
 
-4. **Run tests**
+5. **Run tests**
    ```bash
    just test
    ```

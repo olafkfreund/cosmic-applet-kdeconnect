@@ -148,7 +148,39 @@ uninstall:
 setup:
     @echo "🔧 Setting up development environment..."
     rustup component add rustfmt clippy rust-src rust-analyzer
+    just install-hooks
     @echo "✅ Development environment ready!"
+
+# Install git hooks
+install-hooks:
+    @echo "🪝 Installing git hooks..."
+    @mkdir -p .git/hooks
+    @cp hooks/pre-commit .git/hooks/pre-commit
+    @cp hooks/commit-msg .git/hooks/commit-msg
+    @chmod +x .git/hooks/pre-commit
+    @chmod +x .git/hooks/commit-msg
+    @echo "✅ Git hooks installed!"
+    @echo "   - pre-commit: Formats code and runs checks"
+    @echo "   - commit-msg: Enforces conventional commits"
+    @echo ""
+    @echo "To bypass hooks: git commit --no-verify (not recommended)"
+
+# Uninstall git hooks
+uninstall-hooks:
+    @echo "Removing git hooks..."
+    @rm -f .git/hooks/pre-commit
+    @rm -f .git/hooks/commit-msg
+    @echo "✅ Git hooks uninstalled!"
+
+# Test git hooks (without committing)
+test-hooks:
+    @echo "Testing pre-commit hook..."
+    @bash hooks/pre-commit || true
+    @echo ""
+    @echo "Testing commit-msg hook..."
+    @echo "test(example): test commit message" > /tmp/test-commit-msg
+    @bash hooks/commit-msg /tmp/test-commit-msg || true
+    @rm -f /tmp/test-commit-msg
 
 # Watch for changes and rebuild
 watch:

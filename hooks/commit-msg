@@ -1,0 +1,70 @@
+#!/bin/bash
+#
+# Commit message hook for cosmic-applet-kdeconnect
+# Enforces conventional commit message format
+#
+# Format: type(scope): subject
+# Example: feat(protocol): implement battery plugin
+#
+# To install: just install-hooks
+# To bypass (not recommended): git commit --no-verify
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+COMMIT_MSG_FILE=$1
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+# Skip merge commits and other special commits
+if echo "$COMMIT_MSG" | grep -qE "^Merge|^Revert|^Fixup|^Squash"; then
+    exit 0
+fi
+
+# Valid types
+VALID_TYPES="feat|fix|docs|style|refactor|perf|test|build|ci|chore"
+
+# Conventional commit pattern
+PATTERN="^(${VALID_TYPES})(\(.+\))?: .{1,100}"
+
+if ! echo "$COMMIT_MSG" | head -1 | grep -qE "$PATTERN"; then
+    echo -e "${RED}❌ Invalid commit message format!${NC}\n"
+    echo -e "${YELLOW}Commit messages must follow conventional commits format:${NC}"
+    echo -e "  ${GREEN}type(scope): subject${NC}\n"
+    echo -e "${YELLOW}Valid types:${NC}"
+    echo -e "  ${GREEN}feat${NC}     - New feature"
+    echo -e "  ${GREEN}fix${NC}      - Bug fix"
+    echo -e "  ${GREEN}docs${NC}     - Documentation changes"
+    echo -e "  ${GREEN}style${NC}    - Formatting, missing semicolons, etc"
+    echo -e "  ${GREEN}refactor${NC} - Code restructuring"
+    echo -e "  ${GREEN}perf${NC}     - Performance improvement"
+    echo -e "  ${GREEN}test${NC}     - Adding tests"
+    echo -e "  ${GREEN}build${NC}    - Build system changes"
+    echo -e "  ${GREEN}ci${NC}       - CI/CD changes"
+    echo -e "  ${GREEN}chore${NC}    - Maintenance tasks\n"
+    echo -e "${YELLOW}Examples:${NC}"
+    echo -e "  ${GREEN}feat(protocol): implement device discovery${NC}"
+    echo -e "  ${GREEN}fix(applet): correct popup positioning${NC}"
+    echo -e "  ${GREEN}docs(readme): add installation instructions${NC}\n"
+    echo -e "${YELLOW}Your commit message:${NC}"
+    echo -e "  ${RED}$(head -1 "$COMMIT_MSG_FILE")${NC}\n"
+    echo -e "${YELLOW}To bypass (not recommended): git commit --no-verify${NC}\n"
+    exit 1
+fi
+
+# Check subject line length
+SUBJECT=$(echo "$COMMIT_MSG" | head -1)
+if [ ${#SUBJECT} -gt 100 ]; then
+    echo -e "${YELLOW}⚠${NC}  Subject line is ${#SUBJECT} characters (recommended: <72, max: 100)"
+fi
+
+# Check for imperative mood helpers
+if echo "$SUBJECT" | grep -qiE "(added|adds|adding|fixed|fixes|fixing|updated|updates|updating)"; then
+    echo -e "${YELLOW}⚠${NC}  Consider using imperative mood: 'add' not 'added', 'fix' not 'fixed'"
+fi
+
+# All good
+echo -e "${GREEN}✓${NC} Commit message format is correct"
+exit 0

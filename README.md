@@ -286,11 +286,18 @@ All contributions must meet the acceptance criteria to ensure consistent quality
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes
-4. Run tests and linting (`just test && just lint`)
-5. Commit your changes (`git commit -m 'Add amazing feature'`)
-6. Push to the branch (`git push origin feature/amazing-feature`)
-7. Open a Pull Request
+3. Set up git hooks: `just setup` or `just install-hooks`
+4. Make your changes
+5. Git hooks will automatically:
+   - Format your code (`cargo fmt`)
+   - Run linting checks (`cargo clippy`)
+   - Run tests (`cargo test`)
+   - Enforce commit message format
+6. Commit your changes (`git commit -m 'feat(scope): add amazing feature'`)
+7. Push to the branch (`git push origin feature/amazing-feature`)
+8. Open a Pull Request
+
+**Note**: Git hooks automatically check code quality. See [hooks/README.md](hooks/README.md) for details.
 
 ## Protocol Compatibility
 
