@@ -439,22 +439,74 @@ just test-discovery
 - Other Linux desktop environments
 - Mobile Linux (Plasma Mobile)
 
+## Development Skills and Guidelines
+
+### Essential Reading for Development
+
+When working on this project, always reference these comprehensive guides:
+
+1. **libcosmic Best Practices** - @.claude/skills/libcosmic-best-practices.md
+   - COSMIC application patterns
+   - State management best practices
+   - UI/UX guidelines
+   - Performance optimization
+   - Error handling patterns
+   - Theming and styling
+   - Testing strategies
+
+2. **KDE Connect Protocol Guide** - @.claude/skills/kdeconnect-protocol.md
+   - Protocol implementation details
+   - Packet structures and formats
+   - Plugin development patterns
+   - TLS pairing flow
+   - Device discovery mechanism
+   - Testing and debugging
+
+3. **COSMIC Applet Development** - @.claude/skills/cosmic-applet-dev.md
+   - Applet architecture
+   - Panel integration
+   - Popup windows
+   - Context handling
+   - Resource management
+   - DBus integration
+
+### Critical Development Principles
+
+**libcosmic Development:**
+- ❌ **NEVER** use `unwrap()` or `expect()` - always handle errors properly
+- ✅ **ALWAYS** use proper error handling with `Result` and `Option`
+- ✅ **ALWAYS** use COSMIC widgets over custom implementations
+- ✅ **ALWAYS** test in both dark and light themes
+- ✅ **ALWAYS** use async for I/O operations
+- ✅ **ALWAYS** log errors with `tracing` instead of panicking
+
+**Protocol Development:**
+- ✅ **ALWAYS** include newline terminator in packets
+- ✅ **ALWAYS** use TLS 1.3 for device communication
+- ✅ **ALWAYS** validate certificate fingerprints
+- ✅ **ALWAYS** follow KDE Connect protocol v7/8 specification
+- ✅ **ALWAYS** implement proper timeout and retry logic
+
 ## Notes for Claude
 
 ### When Working on This Project
 
 **Always:**
+- Reference the skill files above for detailed patterns
 - Follow Rust best practices
 - Use async/await patterns
 - Write comprehensive tests
 - Document public APIs
 - Consider security implications
+- Check libcosmic-best-practices.md before implementing UI
+- Check kdeconnect-protocol.md before implementing protocol features
 
 **Remember:**
 - Olaf is experienced with DevOps and infrastructure
 - NixOS is the primary development platform
 - COSMIC Desktop is Wayland-only
 - The protocol must remain compatible with KDE Connect
+- All skill files contain battle-tested patterns and examples
 
 **Ask About:**
 - UI/UX design decisions
@@ -469,6 +521,7 @@ just test-discovery
 - Clear variable names
 - Comprehensive error handling
 - Well-structured modules
+- Follow patterns from libcosmic-best-practices.md
 
 **Documentation:**
 - Include rustdoc comments
