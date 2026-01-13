@@ -38,7 +38,7 @@ rcgen = { version = "0.13", features = ["aws_lc_rs"] }
 rustls-pemfile = "2.2"
 
 # Service Discovery
-mdns-sd = "0.11"
+mdns-sd = "0.17"
 
 # DBus
 zbus = "4"
