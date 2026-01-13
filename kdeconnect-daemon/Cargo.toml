@@ -1,0 +1,24 @@
+[package]
+name = "kdeconnect-daemon"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "KDE Connect background daemon"
+
+[dependencies]
+kdeconnect-protocol = { path = "../kdeconnect-protocol" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+dirs = { workspace = true }
+toml = { workspace = true }
+zbus = { workspace = true }
+
+[[bin]]
+name = "kdeconnect-daemon"
+path = "src/main.rs"
