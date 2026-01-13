@@ -102,6 +102,7 @@
 pub mod battery;
 pub mod notification;
 pub mod ping;
+pub mod share;
 
 use crate::{Device, Packet, ProtocolError, Result};
 use async_trait::async_trait;
