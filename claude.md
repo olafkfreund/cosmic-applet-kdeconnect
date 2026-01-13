@@ -439,7 +439,22 @@ just test-discovery
 - Other Linux desktop environments
 - Mobile Linux (Plasma Mobile)
 
-## Development Skills and Guidelines
+## Development Standards and Guidelines
+
+### Acceptance Criteria
+
+**CRITICAL:** All code must meet the acceptance criteria defined in:
+- **@ACCEPTANCE_CRITERIA.md** - Complete definition of done, quality standards, and requirements
+
+This includes:
+- Definition of Done checklist
+- Code quality standards
+- Protocol implementation requirements
+- UI/UX acceptance criteria
+- Security requirements
+- Performance benchmarks
+- Testing requirements
+- Pull request checklist
 
 ### Essential Reading for Development
 

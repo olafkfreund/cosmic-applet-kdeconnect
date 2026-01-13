@@ -276,7 +276,11 @@ just audit
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome! Please see:
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Development workflow and guidelines
+- [ACCEPTANCE_CRITERIA.md](ACCEPTANCE_CRITERIA.md) - Quality standards and definition of done
+
+All contributions must meet the acceptance criteria to ensure consistent quality.
 
 ### Development Workflow
 

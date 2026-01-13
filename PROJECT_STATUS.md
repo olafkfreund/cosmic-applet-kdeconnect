@@ -90,6 +90,8 @@ I've prepared **18 comprehensive GitHub issues** organized by phase:
 1. **GITHUB_ISSUES.md** - Complete issue descriptions with full details
 2. **create-issues.sh** - Automated script to create all issues
 3. **PROJECT_STATUS.md** - This file
+4. **ACCEPTANCE_CRITERIA.md** - Definition of done and quality standards
+5. **.github/pull_request_template.md** - PR checklist template
 
 ### How to Create Issues
 

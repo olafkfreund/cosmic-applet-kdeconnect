@@ -42,6 +42,13 @@ This project follows the [Rust Code of Conduct](https://www.rust-lang.org/polici
    just test
    ```
 
+## Acceptance Criteria
+
+**Before you start developing, read:**
+- [ACCEPTANCE_CRITERIA.md](ACCEPTANCE_CRITERIA.md) - Complete definition of done and quality standards
+
+All contributions must meet these criteria to be merged. This ensures consistent quality across the project.
+
 ## Development Workflow
 
 ### 1. Create a Branch
