@@ -20,12 +20,10 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
-    "GPL-3.0",
     "GPL-3.0-only",
     "GPL-3.0-or-later",
     "MPL-2.0",
     "Zlib",
-    "Unicode-DFS-2016",
     "Unicode-3.0",
     "CC0-1.0",
     "BSL-1.0",
@@ -41,6 +39,17 @@ expression = "MIT AND ISC AND OpenSSL"
 license-files = [
     { path = "LICENSE", hash = 0xbd0eed23 }
 ]
+
+# Git dependencies from pop-os that don't specify license in Cargo.toml
+[[licenses.clarify]]
+name = "mime"
+version = "0.1.0"
+expression = "MIT"
+
+[[licenses.clarify]]
+name = "xdg-shell-wrapper-config"
+version = "0.1.0"
+expression = "GPL-3.0-only"
 
 [bans]
 multiple-versions = "warn"

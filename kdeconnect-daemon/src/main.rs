@@ -8,10 +8,11 @@ use kdeconnect_protocol::{
     discovery::{DiscoveryConfig, DiscoveryEvent, DiscoveryService},
     pairing::{PairingConfig, PairingEvent, PairingService, PairingStatus},
     plugins::{
-        battery::BatteryPlugin, clipboard::ClipboardPlugin, mpris::MprisPlugin,
-        notification::NotificationPlugin, ping::PingPlugin, share::SharePlugin, PluginManager,
+        battery::BatteryPluginFactory, clipboard::ClipboardPluginFactory,
+        mpris::MprisPluginFactory, notification::NotificationPluginFactory,
+        ping::PingPluginFactory, share::SharePluginFactory, PluginManager,
     },
-    CertificateInfo, Device, DeviceInfo, DeviceManager, DeviceType,
+    CertificateInfo, DeviceInfo, DeviceManager, DeviceType,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -140,71 +141,59 @@ impl Daemon {
         }
     }
 
-    /// Initialize plugins
+    /// Initialize plugin factories
     async fn initialize_plugins(&self) -> Result<()> {
         let mut manager = self.plugin_manager.write().await;
 
-        info!("Initializing plugins...");
+        info!("Registering plugin factories...");
 
-        // Register enabled plugins
+        // Register enabled plugin factories
         if self.config.plugins.enable_ping {
-            info!("Registering ping plugin");
+            info!("Registering ping plugin factory");
             manager
-                .register(Box::new(PingPlugin::new()))
-                .context("Failed to register ping plugin")?;
+                .register_factory(Arc::new(PingPluginFactory))
+                .context("Failed to register ping plugin factory")?;
         }
 
         if self.config.plugins.enable_battery {
-            info!("Registering battery plugin");
+            info!("Registering battery plugin factory");
             manager
-                .register(Box::new(BatteryPlugin::new()))
-                .context("Failed to register battery plugin")?;
+                .register_factory(Arc::new(BatteryPluginFactory))
+                .context("Failed to register battery plugin factory")?;
         }
 
         if self.config.plugins.enable_notification {
-            info!("Registering notification plugin");
+            info!("Registering notification plugin factory");
             manager
-                .register(Box::new(NotificationPlugin::new()))
-                .context("Failed to register notification plugin")?;
+                .register_factory(Arc::new(NotificationPluginFactory))
+                .context("Failed to register notification plugin factory")?;
         }
 
         if self.config.plugins.enable_share {
-            info!("Registering share plugin");
+            info!("Registering share plugin factory");
             manager
-                .register(Box::new(SharePlugin::new()))
-                .context("Failed to register share plugin")?;
+                .register_factory(Arc::new(SharePluginFactory))
+                .context("Failed to register share plugin factory")?;
         }
 
         if self.config.plugins.enable_clipboard {
-            info!("Registering clipboard plugin");
+            info!("Registering clipboard plugin factory");
             manager
-                .register(Box::new(ClipboardPlugin::new()))
-                .context("Failed to register clipboard plugin")?;
+                .register_factory(Arc::new(ClipboardPluginFactory))
+                .context("Failed to register clipboard plugin factory")?;
         }
 
         if self.config.plugins.enable_mpris {
-            info!("Registering MPRIS plugin");
+            info!("Registering MPRIS plugin factory");
             manager
-                .register(Box::new(MprisPlugin::new()))
-                .context("Failed to register MPRIS plugin")?;
+                .register_factory(Arc::new(MprisPluginFactory))
+                .context("Failed to register MPRIS plugin factory")?;
         }
 
-        // Create a temporary device for initialization
-        let device = Device::from_discovery(self.device_info.clone());
-
-        // Initialize all plugins
-        manager
-            .init_all(&device)
-            .await
-            .context("Failed to initialize plugins")?;
-
-        // Start all plugins
-        manager
-            .start_all()
-            .await
-            .context("Failed to start plugins")?;
-
-        info!("All plugins initialized and started");
+        info!(
+            "All plugin factories registered ({} total)",
+            manager.factory_count()
+        );
 
         Ok(())
     }
@@ -492,6 +481,21 @@ impl Daemon {
             } => {
                 info!("Device {} connected from {}", device_id, remote_addr);
 
+                // Initialize per-device plugins
+                {
+                    let dev_manager = device_manager.read().await;
+                    if let Some(device) = dev_manager.get_device(&device_id) {
+                        let mut plug_manager = plugin_manager.write().await;
+                        if let Err(e) = plug_manager.init_device_plugins(&device_id, device).await {
+                            error!("Failed to initialize plugins for device {}: {}", device_id, e);
+                        } else {
+                            info!("Initialized plugins for device {}", device_id);
+                        }
+                    } else {
+                        warn!("Cannot initialize plugins - device {} not found in device manager", device_id);
+                    }
+                }
+
                 // Emit DBus signal for device state changed
                 if let Some(dbus) = dbus_server {
                     if let Err(e) = dbus
@@ -504,6 +508,16 @@ impl Daemon {
             }
             ConnectionEvent::Disconnected { device_id, reason } => {
                 info!("Device {} disconnected (reason: {:?})", device_id, reason);
+
+                // Cleanup per-device plugins
+                {
+                    let mut plug_manager = plugin_manager.write().await;
+                    if let Err(e) = plug_manager.cleanup_device_plugins(&device_id).await {
+                        error!("Failed to cleanup plugins for device {}: {}", device_id, e);
+                    } else {
+                        info!("Cleaned up plugins for device {}", device_id);
+                    }
+                }
 
                 // Emit DBus signal for device state changed
                 if let Some(dbus) = dbus_server {
