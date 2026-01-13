@@ -654,6 +654,14 @@ impl PluginManager {
         self.device_plugins.len()
     }
 
+    /// Get number of plugins initialized for a specific device
+    pub fn device_plugin_count(&self, device_id: &str) -> usize {
+        self.device_plugins
+            .get(device_id)
+            .map(|plugins| plugins.len())
+            .unwrap_or(0)
+    }
+
     /// Get number of registered plugins (deprecated)
     ///
     /// Use `factory_count()` to get number of registered factories.
@@ -745,60 +753,247 @@ mod tests {
         assert!(manager.list_plugins().is_empty());
     }
 
-    #[test]
-    #[ignore = "Needs update for per-device plugin architecture (Issue #33)"]
-    fn test_plugin_registration() {
-        // Test disabled - needs rewrite for factory-based system
+    // MockPluginFactory for testing
+    #[derive(Debug, Clone)]
+    struct MockPluginFactory {
+        name: String,
+        incoming: Vec<String>,
+        outgoing: Vec<String>,
+    }
+
+    impl MockPluginFactory {
+        fn new(name: &str, incoming: Vec<&str>, outgoing: Vec<&str>) -> Self {
+            Self {
+                name: name.to_string(),
+                incoming: incoming.iter().map(|s| s.to_string()).collect(),
+                outgoing: outgoing.iter().map(|s| s.to_string()).collect(),
+            }
+        }
+    }
+
+    impl PluginFactory for MockPluginFactory {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn incoming_capabilities(&self) -> Vec<String> {
+            self.incoming.clone()
+        }
+
+        fn outgoing_capabilities(&self) -> Vec<String> {
+            self.outgoing.clone()
+        }
+
+        fn create(&self) -> Box<dyn Plugin> {
+            let incoming: Vec<&str> = self.incoming.iter().map(|s| s.as_str()).collect();
+            let outgoing: Vec<&str> = self.outgoing.iter().map(|s| s.as_str()).collect();
+            Box::new(MockPlugin::new(&self.name, incoming, outgoing))
+        }
     }
 
     #[test]
-    #[ignore = "Needs update for per-device plugin architecture (Issue #33)"]
-    fn test_duplicate_plugin_registration() {
-        // Test disabled - needs rewrite for factory-based system
+    fn test_factory_registration() {
+        let mut manager = PluginManager::new();
+        let factory = Arc::new(MockPluginFactory::new(
+            "test_plugin",
+            vec!["kdeconnect.test"],
+            vec!["kdeconnect.test.response"],
+        ));
+
+        assert!(manager.register_factory(factory).is_ok());
+        assert_eq!(manager.factory_count(), 1);
     }
 
     #[test]
-    #[ignore = "Needs update for per-device plugin architecture (Issue #33)"]
+    fn test_duplicate_factory_registration() {
+        let mut manager = PluginManager::new();
+        let factory1 = Arc::new(MockPluginFactory::new(
+            "test_plugin",
+            vec!["kdeconnect.test"],
+            vec![],
+        ));
+        let factory2 = Arc::new(MockPluginFactory::new(
+            "test_plugin",
+            vec!["kdeconnect.test2"],
+            vec![],
+        ));
+
+        assert!(manager.register_factory(factory1).is_ok());
+        let result = manager.register_factory(factory2);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("already registered"));
+    }
+
+    #[test]
     fn test_duplicate_capability_registration() {
-        // Test disabled - needs rewrite for factory-based system
-    }
+        let mut manager = PluginManager::new();
+        let factory1 = Arc::new(MockPluginFactory::new(
+            "plugin1",
+            vec!["kdeconnect.test"],
+            vec![],
+        ));
+        let factory2 = Arc::new(MockPluginFactory::new(
+            "plugin2",
+            vec!["kdeconnect.test"],
+            vec![],
+        ));
 
-    // TODO: These tests need to be rewritten for per-device plugin architecture
-    // See Issue #33 - tests will be updated after daemon integration is complete
-
-    #[test]
-    #[ignore = "Needs update for per-device plugin architecture (Issue #33)"]
-    fn test_plugin_unregistration() {
-        // Test disabled - needs rewrite for factory-based system
-    }
-
-    #[tokio::test]
-    #[ignore = "Needs update for per-device plugin architecture (Issue #33)"]
-    async fn test_plugin_lifecycle() {
-        // Test disabled - needs rewrite for per-device lifecycle
-    }
-
-    #[tokio::test]
-    #[ignore = "Needs update for per-device plugin architecture (Issue #33)"]
-    async fn test_packet_routing() {
-        // Test disabled - needs rewrite for per-device routing
-    }
-
-    #[test]
-    #[ignore = "Needs update for per-device plugin architecture (Issue #33)"]
-    fn test_capability_aggregation() {
-        // Test disabled - needs rewrite for factory-based system
-    }
-
-    #[test]
-    #[ignore = "Needs update for per-device plugin architecture (Issue #33)"]
-    fn test_plugin_lookup() {
-        // Test disabled - needs rewrite for factory-based system
+        assert!(manager.register_factory(factory1).is_ok());
+        let result = manager.register_factory(factory2);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("already handled"));
     }
 
     #[tokio::test]
-    #[ignore = "Needs update for per-device plugin architecture (Issue #33)"]
+    async fn test_per_device_plugin_initialization() {
+        let mut manager = PluginManager::new();
+        let factory = Arc::new(MockPluginFactory::new(
+            "test_plugin",
+            vec!["kdeconnect.test"],
+            vec![],
+        ));
+
+        manager.register_factory(factory).unwrap();
+
+        let device = create_test_device();
+        let device_id = device.id();
+
+        assert!(manager
+            .init_device_plugins(device_id, &device)
+            .await
+            .is_ok());
+        assert_eq!(manager.device_plugin_count(device_id), 1);
+    }
+
+    #[tokio::test]
+    async fn test_per_device_plugin_cleanup() {
+        let mut manager = PluginManager::new();
+        let factory = Arc::new(MockPluginFactory::new(
+            "test_plugin",
+            vec!["kdeconnect.test"],
+            vec![],
+        ));
+
+        manager.register_factory(factory).unwrap();
+
+        let device = create_test_device();
+        let device_id = device.id();
+
+        manager
+            .init_device_plugins(device_id, &device)
+            .await
+            .unwrap();
+        assert_eq!(manager.device_plugin_count(device_id), 1);
+
+        assert!(manager.cleanup_device_plugins(device_id).await.is_ok());
+        assert_eq!(manager.device_plugin_count(device_id), 0);
+    }
+
+    #[tokio::test]
+    async fn test_per_device_packet_routing() {
+        let mut manager = PluginManager::new();
+        let factory = Arc::new(MockPluginFactory::new(
+            "test_plugin",
+            vec!["kdeconnect.test"],
+            vec![],
+        ));
+
+        manager.register_factory(factory).unwrap();
+
+        let mut device = create_test_device();
+        let device_id = device.id().to_string();
+
+        manager
+            .init_device_plugins(&device_id, &device)
+            .await
+            .unwrap();
+
+        let packet = Packet::new("kdeconnect.test", serde_json::json!({}));
+        assert!(manager
+            .handle_packet(&device_id, &packet, &mut device)
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_multiple_devices_independent_state() {
+        let mut manager = PluginManager::new();
+        let factory = Arc::new(MockPluginFactory::new(
+            "test_plugin",
+            vec!["kdeconnect.test"],
+            vec![],
+        ));
+
+        manager.register_factory(factory).unwrap();
+
+        let device1 = create_test_device();
+        let device1_id = device1.id();
+        let device2 = create_test_device();
+        let device2_id = device2.id();
+
+        manager
+            .init_device_plugins(device1_id, &device1)
+            .await
+            .unwrap();
+        manager
+            .init_device_plugins(device2_id, &device2)
+            .await
+            .unwrap();
+
+        assert_eq!(manager.device_plugin_count(device1_id), 1);
+        assert_eq!(manager.device_plugin_count(device2_id), 1);
+
+        manager.cleanup_device_plugins(device1_id).await.unwrap();
+        assert_eq!(manager.device_plugin_count(device1_id), 0);
+        assert_eq!(manager.device_plugin_count(device2_id), 1);
+    }
+
+    #[test]
+    fn test_capability_lookup() {
+        let mut manager = PluginManager::new();
+        let factory = Arc::new(MockPluginFactory::new(
+            "test_plugin",
+            vec!["kdeconnect.test", "kdeconnect.test2"],
+            vec![],
+        ));
+
+        manager.register_factory(factory).unwrap();
+        let capabilities = manager.get_all_incoming_capabilities();
+        assert_eq!(capabilities.len(), 2);
+        assert!(capabilities.contains(&"kdeconnect.test".to_string()));
+        assert!(capabilities.contains(&"kdeconnect.test2".to_string()));
+    }
+
+    #[tokio::test]
     async fn test_unsupported_packet_type() {
-        // Test disabled - needs rewrite for per-device routing
+        let mut manager = PluginManager::new();
+        let factory = Arc::new(MockPluginFactory::new(
+            "test_plugin",
+            vec!["kdeconnect.test"],
+            vec![],
+        ));
+
+        manager.register_factory(factory).unwrap();
+
+        let mut device = create_test_device();
+        let device_id = device.id().to_string();
+
+        manager
+            .init_device_plugins(&device_id, &device)
+            .await
+            .unwrap();
+
+        let packet = Packet::new("kdeconnect.unsupported", serde_json::json!({}));
+        let result = manager
+            .handle_packet(&device_id, &packet, &mut device)
+            .await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No plugin handles"));
     }
 }
