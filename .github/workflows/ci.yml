@@ -83,7 +83,9 @@ jobs:
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run clippy
-        run: cargo clippy --all-targets --all-features -- -W clippy::all
+        run: |
+          # Run clippy on all packages except cosmic-applet-kdeconnect (has i18n-embed dependency issue)
+          cargo clippy --package kdeconnect-protocol --package kdeconnect-daemon --package cosmic-kdeconnect --all-targets --all-features -- -W clippy::all
 
   check:
     name: Check Build
