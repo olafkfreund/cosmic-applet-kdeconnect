@@ -337,22 +337,56 @@ impl KdeConnectInterface {
 
         drop(device_manager);
 
-        // TODO: Implement file sharing with TCP payload transfer
-        // This requires:
-        // 1. Verify file exists and is readable
-        // 2. Get file metadata (size, timestamps)
-        // 3. Set up TCP server for payload transfer
-        // 4. Create share packet with FileShareInfo and port
-        // 5. Send packet via ConnectionManager
-        // 6. Handle incoming connection and stream file data
-        // 7. Track transfer progress and handle errors
-        //
-        // This is a complex feature requiring payload transfer infrastructure
-        // in the ConnectionManager and transport layer.
-        warn!("DBus: ShareFile not implemented - requires TCP payload transfer infrastructure");
-        Err(zbus::fdo::Error::Failed(
-            "File sharing not yet implemented - requires payload transfer support".to_string(),
-        ))
+        // Extract file metadata
+        use kdeconnect_protocol::{FileTransferInfo, PayloadServer};
+        let file_info = FileTransferInfo::from_path(&path)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to read file metadata: {}", e)))?;
+
+        info!(
+            "DBus: Sharing file '{}' ({} bytes) to {}",
+            file_info.filename, file_info.size, device_id
+        );
+
+        // Create payload server on available port
+        let server = PayloadServer::new()
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to create payload server: {}", e)))?;
+        let port = server.port();
+
+        info!("DBus: Payload server listening on port {}", port);
+
+        // Create share packet with file info and payload transfer port
+        use kdeconnect_protocol::plugins::share::{FileShareInfo, SharePlugin};
+        let share_info: FileShareInfo = file_info.clone().into();
+        let plugin = SharePlugin::new();
+        let packet = plugin.create_file_packet(share_info, port);
+
+        // Send packet via ConnectionManager
+        let conn_manager = self.connection_manager.read().await;
+        conn_manager
+            .send_packet(&device_id, &packet)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to send share packet: {}", e)))?;
+
+        info!("DBus: Share packet sent to {}, waiting for connection", device_id);
+
+        // Spawn background task to handle file transfer
+        let file_path = path.clone();
+        let device_id_clone = device_id.clone();
+        tokio::spawn(async move {
+            match server.send_file(&file_path).await {
+                Ok(()) => {
+                    info!("File transfer completed successfully for device {}", device_id_clone);
+                }
+                Err(e) => {
+                    warn!("File transfer failed for device {}: {}", device_id_clone, e);
+                }
+            }
+        });
+
+        info!("DBus: File sharing initiated for {}", device_id);
+        Ok(())
     }
 
     /// Share text or URL with a device

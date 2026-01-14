@@ -8,6 +8,7 @@ pub mod device;
 pub mod discovery;
 pub mod packet;
 pub mod pairing;
+pub mod payload;
 pub mod plugins;
 pub mod transport;
 
@@ -24,6 +25,7 @@ pub use pairing::{
     CertificateInfo, PairingConfig, PairingEvent, PairingHandler, PairingPacket, PairingService,
     PairingStatus, PAIRING_TIMEOUT,
 };
+pub use payload::{FileTransferInfo, PayloadClient, PayloadServer};
 pub use plugins::{Plugin, PluginManager};
 pub use transport::{TcpConnection, TlsConnection, TlsServer};
 
