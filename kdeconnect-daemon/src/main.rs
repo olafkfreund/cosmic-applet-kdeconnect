@@ -60,6 +60,9 @@ struct Daemon {
 
     /// DBus server
     dbus_server: Option<Arc<DbusServer>>,
+
+    /// MPRIS manager for local media player control
+    mpris_manager: Option<Arc<mpris_manager::MprisManager>>,
 }
 
 impl Daemon {
@@ -146,6 +149,23 @@ impl Daemon {
             }
         };
 
+        // Initialize MPRIS manager if enabled
+        let mpris_manager = if config.plugins.enable_mpris {
+            mpris_manager::MprisManager::new()
+                .await
+                .map(|manager| {
+                    info!("MPRIS manager initialized");
+                    Arc::new(manager)
+                })
+                .map_err(|e| {
+                    warn!("Failed to initialize MPRIS manager: {}", e);
+                    warn!("MPRIS functionality will be disabled");
+                })
+                .ok()
+        } else {
+            None
+        };
+
         Ok(Self {
             config,
             certificate,
@@ -158,6 +178,7 @@ impl Daemon {
             connection_manager,
             cosmic_notifier,
             dbus_server: None,
+            mpris_manager,
         })
     }
 
@@ -577,7 +598,35 @@ impl Daemon {
         Ok(())
     }
 
-    /// Start clipboard monitoring
+    /// Start MPRIS player monitoring
+    async fn start_mpris_monitoring(&self) -> Result<()> {
+        let Some(mpris_manager) = &self.mpris_manager else {
+            return Ok(());
+        };
+
+        info!("Starting MPRIS player discovery and monitoring...");
+
+        let players = match mpris_manager.discover_players().await {
+            Ok(players) => players,
+            Err(e) => {
+                warn!("Failed to discover MPRIS players: {}", e);
+                return Ok(());
+            }
+        };
+
+        info!("Discovered {} MPRIS players: {:?}", players.len(), players);
+
+        for player in players {
+            if let Err(e) = mpris_manager.start_monitoring(player.clone()).await {
+                warn!("Failed to start monitoring player {}: {}", player, e);
+            } else {
+                info!("Started monitoring player: {}", player);
+            }
+        }
+
+        Ok(())
+    }
+
     async fn start_clipboard_monitor(&self) -> Result<()> {
         if !self.config.plugins.enable_clipboard {
             info!("Clipboard plugin disabled, skipping clipboard monitor");
@@ -1183,6 +1232,12 @@ async fn main() -> Result<()> {
         .start_clipboard_monitor()
         .await
         .context("Failed to start clipboard monitor")?;
+
+    // Start MPRIS monitoring
+    daemon
+        .start_mpris_monitoring()
+        .await
+        .context("Failed to start MPRIS monitoring")?;
 
     // Run daemon
     let result = daemon.run().await;
