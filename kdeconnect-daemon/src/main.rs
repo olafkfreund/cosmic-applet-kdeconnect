@@ -691,6 +691,34 @@ impl Daemon {
                                     }
                                 }
                             }
+                            "kdeconnect.share.request" => {
+                                // Check if it's a file share (has filename and payload)
+                                if let Some(filename) = packet.body.get("filename").and_then(|v| v.as_str()) {
+                                    if packet.payload_size.is_some() {
+                                        // This is a file transfer, show notification
+                                        let file_size = packet.payload_size.unwrap_or(0);
+
+                                        // Construct download path
+                                        let downloads_dir = std::path::PathBuf::from(
+                                            std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())
+                                        ).join("Downloads");
+                                        let file_path = downloads_dir.join(filename);
+
+                                        if let Err(e) = notifier.notify_file_received(
+                                            &device_name,
+                                            filename,
+                                            &file_path.to_string_lossy()
+                                        ).await {
+                                            warn!("Failed to send file received notification: {}", e);
+                                        } else {
+                                            info!(
+                                                "Sent file received notification for '{}' ({} bytes) from {}",
+                                                filename, file_size, device_name
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                             _ => {
                                 // Other packet types don't trigger notifications
                             }
