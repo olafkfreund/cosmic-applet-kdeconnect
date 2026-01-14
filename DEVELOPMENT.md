@@ -8,6 +8,7 @@ This guide provides detailed information for developers working on cosmic-applet
 - [Development Environment](#development-environment)
 - [DBus Interface](#dbus-interface)
 - [Plugin System](#plugin-system)
+- [Payload Transfer System](#payload-transfer-system)
 - [Configuration System](#configuration-system)
 - [COSMIC Notifications](#cosmic-notifications)
 - [Testing](#testing)
@@ -288,6 +289,223 @@ impl PluginFactory for ExamplePluginFactory {
     // ... capabilities
 }
 ```
+
+## Payload Transfer System
+
+### Overview
+
+The payload transfer system enables file transfers between devices via TCP connections.
+When sharing a file, the sender creates a TCP server, sends a share packet with the port,
+and the receiver connects to download the file.
+
+### Architecture
+
+```
+Sender (Desktop)                                    Receiver (Mobile)
+┌────────────────┐                                  ┌────────────────┐
+│ ShareFile      │                                  │ Share Plugin   │
+│ DBus Method    │                                  │                │
+└───────┬────────┘                                  └────────────────┘
+        │                                                     ▲
+        │ 1. Extract metadata                                │
+        ▼                                                     │
+┌────────────────┐                                          │
+│ FileTransferInfo│                                          │
+└───────┬────────┘                                          │
+        │                                                     │
+        │ 2. Create PayloadServer                            │
+        ▼                                                     │
+┌────────────────┐                                          │
+│ TCP Server     │                                          │
+│ Port: 1739-1764│                                          │
+└───────┬────────┘                                          │
+        │                                                     │
+        │ 3. Send share packet                               │
+        ├────────────────────────────────────────────────────┤
+        │                                                     │
+        │ 4. Wait for connection                              │
+        │◄────────────────────────────────────────────────────┤
+        │                                                     │
+        │ 5. Stream file data                                 │
+        ├────────────────────────────────────────────────────►│
+        │                                                     │
+        │ 6. Close connection                                 │
+        └─────────────────────────────────────────────────────┘
+```
+
+### Components
+
+#### PayloadServer
+
+TCP server for sending files:
+
+```rust
+use kdeconnect_protocol::{PayloadServer, FileTransferInfo};
+
+// Extract file metadata
+let file_info = FileTransferInfo::from_path("/path/to/file.pdf").await?;
+
+// Create server on available port
+let server = PayloadServer::new().await?;
+let port = server.port(); // 1739-1764
+
+// Send share packet with port info
+// ... create and send packet ...
+
+// Accept connection and transfer file
+server.send_file("/path/to/file.pdf").await?;
+```
+
+**Features**:
+- Automatic port selection (1739-1764)
+- 64KB buffer for efficient streaming
+- Connection timeout (30s)
+- Transfer timeout (60s per operation)
+- Progress logging
+
+#### PayloadClient
+
+TCP client for receiving files:
+
+```rust
+use kdeconnect_protocol::PayloadClient;
+
+// Connect to sender's payload server
+let client = PayloadClient::new("192.168.1.100", 1739).await?;
+
+// Download file
+client.receive_file("/tmp/received.pdf", 1048576).await?;
+```
+
+**Features**:
+- Connection timeout handling
+- Size validation
+- Premature disconnection detection
+- Progress tracking
+
+#### FileTransferInfo
+
+File metadata extraction:
+
+```rust
+use kdeconnect_protocol::FileTransferInfo;
+
+let info = FileTransferInfo::from_path("/path/to/file").await?;
+println!("Filename: {}", info.filename);
+println!("Size: {} bytes", info.size);
+println!("Created: {:?}", info.creation_time);
+println!("Modified: {:?}", info.last_modified);
+
+// Convert to SharePlugin's format
+let share_info: FileShareInfo = info.into();
+```
+
+### DBus Integration
+
+The daemon exposes file sharing via DBus:
+
+```bash
+# Share a file
+busctl --user call com.system76.CosmicKdeConnect \
+  /com/system76/CosmicKdeConnect \
+  com.system76.CosmicKdeConnect \
+  ShareFile ss "device-id" "/path/to/file.pdf"
+```
+
+**Implementation Flow**:
+
+1. **Validation**: Check device exists and is connected
+2. **Metadata**: Extract file info using `FileTransferInfo::from_path()`
+3. **Server Creation**: Start `PayloadServer` on available port
+4. **Packet Creation**: Use `SharePlugin::create_file_packet()` with port
+5. **Send Packet**: Send via `ConnectionManager::send_packet()`
+6. **Background Transfer**: Spawn async task to handle file streaming
+7. **Completion**: Log success or failure
+
+### Protocol Details
+
+#### Share Packet Format
+
+```json
+{
+  "id": 1234567890,
+  "type": "kdeconnect.share.request",
+  "body": {
+    "filename": "document.pdf",
+    "creationTime": 1640000000000,
+    "lastModified": 1640000000000,
+    "open": false
+  },
+  "payloadSize": 1048576,
+  "payloadTransferInfo": {
+    "port": 1739
+  }
+}
+```
+
+#### Transfer Protocol
+
+1. **Server Preparation**: Sender binds to port (1739-1764)
+2. **Packet Exchange**: Sender sends share packet with port
+3. **Connection**: Receiver connects to sender's IP:port
+4. **Streaming**: Raw bytes transferred (64KB chunks)
+5. **Completion**: Connection closed after `payloadSize` bytes
+6. **Verification**: Receiver validates size matches
+
+### Error Handling
+
+All errors use the protocol's `ProtocolError` type:
+
+```rust
+// I/O errors (file not found, permission denied, network)
+ProtocolError::Io(std::io::Error)
+
+// Timeout errors
+ProtocolError::Io(std::io::Error { kind: TimedOut, .. })
+
+// Invalid input (no addresses resolved, invalid filename)
+ProtocolError::InvalidPacket(String)
+```
+
+### Performance
+
+- **Buffer Size**: 64KB for optimal streaming
+- **Connection Timeout**: 30 seconds
+- **Transfer Timeout**: 60 seconds per read/write
+- **Throughput**: Network-limited, typically 10-100 MB/s on LAN
+
+### Testing
+
+```bash
+# Test metadata extraction
+cargo test test_file_transfer_info_from_path
+
+# Test server creation
+cargo test test_payload_server_creation
+
+# Test full transfer
+cargo test test_file_transfer_round_trip
+```
+
+### Common Issues
+
+**Port Already in Use**:
+```
+Error: Failed to bind payload server - all ports in range 1739-1764 are in use
+```
+Solution: Close other KDE Connect instances or wait for ports to free
+
+**Connection Timeout**:
+```
+Error: Connection timeout
+```
+Solution: Check firewall rules, ensure ports 1739-1764 open
+
+**Size Mismatch**:
+```
+Error: Connection closed prematurely: received 512 bytes, expected 1024
+```
+Solution: Network interruption, retry transfer
 
 ## Configuration System
 
