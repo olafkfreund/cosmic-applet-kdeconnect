@@ -45,6 +45,7 @@ This project consists of:
 - [x] **URL Opening** (automatic browser launch for shared URLs)
 - [x] **Text Sharing** (automatic clipboard copy for shared text)
 - [x] **Low Battery Notifications** (alerts for connected devices)
+- [x] **Pairing Notifications** (timeout and error feedback)
 - [x] COSMIC Panel Applet with Device List UI (mock data)
 - [x] Comprehensive Test Suite (103 tests, 12 integration tests)
 - [x] CI/CD Pipeline with GitHub Actions
@@ -92,7 +93,13 @@ This project consists of:
   - Automatic low battery notifications
   - Shows charging status
   - Threshold-based alerts (configurable on device)
-- ✅ **COSMIC Notifications** - Desktop notifications for pings, pairing requests, device events, file transfers, low battery
+- ✅ **COSMIC Notifications** - Comprehensive desktop notifications
+  - Pings and messages
+  - Pairing requests, timeouts, and errors
+  - Device connection/disconnection
+  - File transfers
+  - Low battery alerts
+  - Forwarded device notifications
 - ✅ **Per-device Configuration** - Custom settings per device (nicknames, plugin overrides)
 - ✅ **Plugin Management** - Enable/disable plugins globally and per-device
 - ✅ **Device Pairing** - Full pairing flow with fingerprint verification
