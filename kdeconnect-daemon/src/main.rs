@@ -12,7 +12,8 @@ use kdeconnect_protocol::{
     plugins::{
         battery::BatteryPluginFactory, clipboard::ClipboardPluginFactory,
         mpris::MprisPluginFactory, notification::NotificationPluginFactory,
-        ping::PingPluginFactory, share::SharePluginFactory, PluginManager,
+        ping::PingPluginFactory, runcommand::RunCommandPluginFactory,
+        share::SharePluginFactory, PluginManager,
     },
     CertificateInfo, DeviceInfo, DeviceManager, DeviceType,
 };
@@ -235,6 +236,13 @@ impl Daemon {
             manager
                 .register_factory(Arc::new(MprisPluginFactory))
                 .context("Failed to register MPRIS plugin factory")?;
+        }
+
+        if self.config.plugins.enable_runcommand {
+            info!("Registering RunCommand plugin factory");
+            manager
+                .register_factory(Arc::new(RunCommandPluginFactory))
+                .context("Failed to register RunCommand plugin factory")?;
         }
 
         info!(

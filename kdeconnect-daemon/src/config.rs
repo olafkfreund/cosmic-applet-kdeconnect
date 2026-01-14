@@ -87,6 +87,10 @@ pub struct PluginConfig {
     /// Enable MPRIS plugin
     #[serde(default = "default_true")]
     pub enable_mpris: bool,
+
+    /// Enable RunCommand plugin
+    #[serde(default = "default_true")]
+    pub enable_runcommand: bool,
 }
 
 /// Storage paths configuration
@@ -147,6 +151,7 @@ impl Default for PluginConfig {
             enable_share: true,
             enable_clipboard: true,
             enable_mpris: true,
+            enable_runcommand: true,
         }
     }
 }

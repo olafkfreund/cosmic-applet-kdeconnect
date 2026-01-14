@@ -695,6 +695,168 @@ impl KdeConnectInterface {
         Ok(json)
     }
 
+    /// Add a run command for a device
+    ///
+    /// # Arguments
+    /// * `device_id` - The device ID
+    /// * `command_id` - Unique identifier for the command
+    /// * `name` - User-friendly command name
+    /// * `command` - Shell command to execute
+    async fn add_run_command(
+        &self,
+        device_id: String,
+        command_id: String,
+        name: String,
+        command: String,
+    ) -> Result<(), zbus::fdo::Error> {
+        info!(
+            "DBus: AddRunCommand called for {} - ID: {}, Name: {}",
+            device_id, command_id, name
+        );
+
+        let plugin_manager = self.plugin_manager.read().await;
+        let plugin = plugin_manager
+            .get_device_plugin(&device_id, "runcommand")
+            .ok_or_else(|| {
+                zbus::fdo::Error::Failed(format!(
+                    "RunCommand plugin not found for device: {}",
+                    device_id
+                ))
+            })?;
+
+        // Downcast to RunCommandPlugin
+        use kdeconnect_protocol::plugins::runcommand::RunCommandPlugin;
+        let runcommand_plugin = plugin.as_any().downcast_ref::<RunCommandPlugin>().ok_or_else(|| {
+            zbus::fdo::Error::Failed("Failed to downcast to RunCommandPlugin".to_string())
+        })?;
+
+        // Add the command
+        runcommand_plugin
+            .add_command(&command_id, &name, &command)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to add command: {}", e)))?;
+
+        info!(
+            "DBus: Command '{}' added successfully for device {}",
+            command_id, device_id
+        );
+        Ok(())
+    }
+
+    /// Remove a run command from a device
+    ///
+    /// # Arguments
+    /// * `device_id` - The device ID
+    /// * `command_id` - Command identifier to remove
+    async fn remove_run_command(
+        &self,
+        device_id: String,
+        command_id: String,
+    ) -> Result<(), zbus::fdo::Error> {
+        info!(
+            "DBus: RemoveRunCommand called for {} - ID: {}",
+            device_id, command_id
+        );
+
+        let plugin_manager = self.plugin_manager.read().await;
+        let plugin = plugin_manager
+            .get_device_plugin(&device_id, "runcommand")
+            .ok_or_else(|| {
+                zbus::fdo::Error::Failed(format!(
+                    "RunCommand plugin not found for device: {}",
+                    device_id
+                ))
+            })?;
+
+        // Downcast to RunCommandPlugin
+        use kdeconnect_protocol::plugins::runcommand::RunCommandPlugin;
+        let runcommand_plugin = plugin.as_any().downcast_ref::<RunCommandPlugin>().ok_or_else(|| {
+            zbus::fdo::Error::Failed("Failed to downcast to RunCommandPlugin".to_string())
+        })?;
+
+        // Remove the command
+        runcommand_plugin
+            .remove_command(&command_id)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to remove command: {}", e)))?;
+
+        info!(
+            "DBus: Command '{}' removed successfully from device {}",
+            command_id, device_id
+        );
+        Ok(())
+    }
+
+    /// Get all run commands for a device as JSON
+    ///
+    /// # Arguments
+    /// * `device_id` - The device ID
+    ///
+    /// # Returns
+    /// JSON string with command map {id: {name: string, command: string}}
+    async fn get_run_commands(&self, device_id: String) -> Result<String, zbus::fdo::Error> {
+        debug!("DBus: GetRunCommands called for {}", device_id);
+
+        let plugin_manager = self.plugin_manager.read().await;
+        let plugin = plugin_manager
+            .get_device_plugin(&device_id, "runcommand")
+            .ok_or_else(|| {
+                zbus::fdo::Error::Failed(format!(
+                    "RunCommand plugin not found for device: {}",
+                    device_id
+                ))
+            })?;
+
+        // Downcast to RunCommandPlugin
+        use kdeconnect_protocol::plugins::runcommand::RunCommandPlugin;
+        let runcommand_plugin = plugin.as_any().downcast_ref::<RunCommandPlugin>().ok_or_else(|| {
+            zbus::fdo::Error::Failed("Failed to downcast to RunCommandPlugin".to_string())
+        })?;
+
+        // Get all commands
+        let commands = runcommand_plugin.get_commands().await;
+
+        // Serialize to JSON
+        let json = serde_json::to_string_pretty(&commands)
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to serialize commands: {}", e)))?;
+
+        debug!("DBus: Retrieved {} commands for device {}", commands.len(), device_id);
+        Ok(json)
+    }
+
+    /// Clear all run commands for a device
+    ///
+    /// # Arguments
+    /// * `device_id` - The device ID
+    async fn clear_run_commands(&self, device_id: String) -> Result<(), zbus::fdo::Error> {
+        info!("DBus: ClearRunCommands called for {}", device_id);
+
+        let plugin_manager = self.plugin_manager.read().await;
+        let plugin = plugin_manager
+            .get_device_plugin(&device_id, "runcommand")
+            .ok_or_else(|| {
+                zbus::fdo::Error::Failed(format!(
+                    "RunCommand plugin not found for device: {}",
+                    device_id
+                ))
+            })?;
+
+        // Downcast to RunCommandPlugin
+        use kdeconnect_protocol::plugins::runcommand::RunCommandPlugin;
+        let runcommand_plugin = plugin.as_any().downcast_ref::<RunCommandPlugin>().ok_or_else(|| {
+            zbus::fdo::Error::Failed("Failed to downcast to RunCommandPlugin".to_string())
+        })?;
+
+        // Clear all commands
+        runcommand_plugin
+            .clear_commands()
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to clear commands: {}", e)))?;
+
+        info!("DBus: All commands cleared for device {}", device_id);
+        Ok(())
+    }
+
     /// Signal: Device was added (discovered)
     ///
     /// Emitted when a new device is discovered on the network.
