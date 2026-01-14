@@ -104,6 +104,7 @@ pub mod clipboard;
 pub mod mpris;
 pub mod notification;
 pub mod ping;
+pub mod remoteinput;
 pub mod runcommand;
 pub mod share;
 

@@ -91,6 +91,10 @@ pub struct PluginConfig {
     /// Enable RunCommand plugin
     #[serde(default = "default_true")]
     pub enable_runcommand: bool,
+
+    /// Enable Remote Input plugin
+    #[serde(default = "default_true")]
+    pub enable_remoteinput: bool,
 }
 
 /// Storage paths configuration
@@ -152,6 +156,7 @@ impl Default for PluginConfig {
             enable_clipboard: true,
             enable_mpris: true,
             enable_runcommand: true,
+            enable_remoteinput: true,
         }
     }
 }

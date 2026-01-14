@@ -12,8 +12,8 @@ use kdeconnect_protocol::{
     plugins::{
         battery::BatteryPluginFactory, clipboard::ClipboardPluginFactory,
         mpris::MprisPluginFactory, notification::NotificationPluginFactory,
-        ping::PingPluginFactory, runcommand::RunCommandPluginFactory,
-        share::SharePluginFactory, PluginManager,
+        ping::PingPluginFactory, remoteinput::RemoteInputPluginFactory,
+        runcommand::RunCommandPluginFactory, share::SharePluginFactory, PluginManager,
     },
     CertificateInfo, DeviceInfo, DeviceManager, DeviceType,
 };
@@ -243,6 +243,13 @@ impl Daemon {
             manager
                 .register_factory(Arc::new(RunCommandPluginFactory))
                 .context("Failed to register RunCommand plugin factory")?;
+        }
+
+        if self.config.plugins.enable_remoteinput {
+            info!("Registering Remote Input plugin factory");
+            manager
+                .register_factory(Arc::new(RemoteInputPluginFactory))
+                .context("Failed to register Remote Input plugin factory")?;
         }
 
         info!(
