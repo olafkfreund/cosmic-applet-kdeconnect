@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
+use zbus::zvariant::OwnedValue;
 use zbus::Connection;
 
 /// MPRIS2 DBus interface names
@@ -54,7 +55,7 @@ impl LoopStatus {
         }
     }
 
-    pub fn to_string(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::None => "None",
             Self::Track => "Track",
@@ -132,6 +133,14 @@ impl MprisManager {
         })
     }
 
+    /// Standard MPRIS object path
+    const MPRIS_OBJECT_PATH: &'static str = "/org/mpris/MediaPlayer2";
+
+    /// Get the DBus bus name for a player
+    fn player_bus_name(player: &str) -> String {
+        format!("{}{}", MPRIS_BUS_PREFIX, player)
+    }
+
     /// Discover all MPRIS2 players on the session bus
     pub async fn discover_players(&self) -> Result<Vec<String>> {
         let dbus_proxy = zbus::fdo::DBusProxy::new(&self.connection)
@@ -166,55 +175,252 @@ impl MprisManager {
         self.players.read().await.get(player).cloned()
     }
 
-    /// Query player state from DBus (not yet implemented - requires zbus property access)
-    pub async fn query_player_state(&self, _player: &str) -> Result<PlayerState> {
-        // TODO: Implement DBus property queries for:
-        // - org.mpris.MediaPlayer2.Player.PlaybackStatus
-        // - org.mpris.MediaPlayer2.Player.Position
-        // - org.mpris.MediaPlayer2.Player.Volume
-        // - org.mpris.MediaPlayer2.Player.LoopStatus
-        // - org.mpris.MediaPlayer2.Player.Shuffle
-        // - org.mpris.MediaPlayer2.Player.Metadata
-        // - org.mpris.MediaPlayer2.Player.CanPlay
-        // - org.mpris.MediaPlayer2.Player.CanPause
-        // - org.mpris.MediaPlayer2.Player.CanGoNext
-        // - org.mpris.MediaPlayer2.Player.CanGoPrevious
-        // - org.mpris.MediaPlayer2.Player.CanSeek
-        // - org.mpris.MediaPlayer2.Identity
+    /// Query player state from DBus
+    pub async fn query_player_state(&self, player: &str) -> Result<PlayerState> {
+        let bus_name = Self::player_bus_name(player);
 
-        warn!("query_player_state not yet implemented - returning default state");
-        Ok(PlayerState::default())
+        let player_proxy = zbus::Proxy::new(
+            &self.connection,
+            bus_name.as_str(),
+            Self::MPRIS_OBJECT_PATH,
+            MPRIS_PLAYER_INTERFACE,
+        )
+        .await
+        .context("Failed to create player proxy")?;
+
+        let mpris_proxy = zbus::Proxy::new(
+            &self.connection,
+            bus_name.as_str(),
+            Self::MPRIS_OBJECT_PATH,
+            MPRIS_INTERFACE,
+        )
+        .await
+        .context("Failed to create MPRIS proxy")?;
+
+        // Query string properties with defaults
+        let playback_status: String = player_proxy
+            .get_property("PlaybackStatus")
+            .await
+            .unwrap_or_else(|_| "Stopped".to_string());
+        let loop_status: String = player_proxy
+            .get_property("LoopStatus")
+            .await
+            .unwrap_or_else(|_| "None".to_string());
+        let identity: String = mpris_proxy
+            .get_property("Identity")
+            .await
+            .unwrap_or_else(|_| player.to_string());
+
+        // Query numeric and boolean properties with defaults
+        let position: i64 = player_proxy.get_property("Position").await.unwrap_or(0);
+        let volume: f64 = player_proxy.get_property("Volume").await.unwrap_or(1.0);
+        let shuffle: bool = player_proxy.get_property("Shuffle").await.unwrap_or(false);
+        let can_play: bool = player_proxy.get_property("CanPlay").await.unwrap_or(true);
+        let can_pause: bool = player_proxy.get_property("CanPause").await.unwrap_or(true);
+        let can_go_next: bool = player_proxy.get_property("CanGoNext").await.unwrap_or(true);
+        let can_go_previous: bool = player_proxy.get_property("CanGoPrevious").await.unwrap_or(true);
+        let can_seek: bool = player_proxy.get_property("CanSeek").await.unwrap_or(true);
+
+        let metadata = self.query_metadata(&player_proxy).await?;
+
+        Ok(PlayerState {
+            name: player.to_string(),
+            identity,
+            playback_status: PlaybackStatus::from_str(&playback_status),
+            position,
+            volume,
+            loop_status: LoopStatus::from_str(&loop_status),
+            shuffle,
+            can_play,
+            can_pause,
+            can_go_next,
+            can_go_previous,
+            can_seek,
+            metadata,
+        })
     }
 
-    /// Call a playback control method (not yet implemented)
-    pub async fn call_player_method(&self, _player: &str, _method: &str) -> Result<()> {
-        // TODO: Implement DBus method calls for:
-        // - org.mpris.MediaPlayer2.Player.Play()
-        // - org.mpris.MediaPlayer2.Player.Pause()
-        // - org.mpris.MediaPlayer2.Player.PlayPause()
-        // - org.mpris.MediaPlayer2.Player.Stop()
-        // - org.mpris.MediaPlayer2.Player.Next()
-        // - org.mpris.MediaPlayer2.Player.Previous()
-        // - org.mpris.MediaPlayer2.Player.Seek(offset)
-        // - org.mpris.MediaPlayer2.Player.SetPosition(trackid, position)
+    /// Query metadata from player
+    async fn query_metadata(&self, player_proxy: &zbus::Proxy<'_>) -> Result<PlayerMetadata> {
+        let metadata_dict: HashMap<String, OwnedValue> = player_proxy
+            .get_property("Metadata")
+            .await
+            .unwrap_or_default();
 
-        warn!("call_player_method not yet implemented");
+        // Helper to extract string fields from metadata
+        let get_string = |key: &str| -> Option<String> {
+            metadata_dict
+                .get(key)
+                .and_then(|v| <&str>::try_from(v).ok())
+                .map(String::from)
+        };
+
+        Ok(PlayerMetadata {
+            // TODO: Handle artist as array of strings (some players return arrays)
+            artist: get_string("xesam:artist"),
+            title: get_string("xesam:title"),
+            album: get_string("xesam:album"),
+            album_art_url: get_string("mpris:artUrl"),
+            length: metadata_dict
+                .get("mpris:length")
+                .and_then(|v| i64::try_from(v).ok())
+                .unwrap_or(0),
+        })
+    }
+
+    /// Call a playback control method
+    pub async fn call_player_method(&self, player: &str, method: &str) -> Result<()> {
+        const VALID_METHODS: &[&str] = &["Play", "Pause", "PlayPause", "Stop", "Next", "Previous"];
+
+        if !VALID_METHODS.contains(&method) {
+            return Err(anyhow::anyhow!("Unknown method: {}", method));
+        }
+
+        let bus_name = Self::player_bus_name(player);
+        let player_proxy = zbus::Proxy::new(
+            &self.connection,
+            bus_name.as_str(),
+            Self::MPRIS_OBJECT_PATH,
+            MPRIS_PLAYER_INTERFACE,
+        )
+        .await
+        .context("Failed to create player proxy")?;
+
+        player_proxy
+            .call_method(method, &())
+            .await
+            .with_context(|| format!("Failed to call {}", method))?;
+
+        debug!("Called {} on player {}", method, player);
         Ok(())
     }
 
-    /// Set a player property (not yet implemented)
-    pub async fn set_player_property(
-        &self,
-        _player: &str,
-        _property: &str,
-        _value: zbus::zvariant::Value<'_>,
-    ) -> Result<()> {
-        // TODO: Implement DBus property setters for:
-        // - org.mpris.MediaPlayer2.Player.Volume
-        // - org.mpris.MediaPlayer2.Player.LoopStatus
-        // - org.mpris.MediaPlayer2.Player.Shuffle
+    /// Seek relative to current position
+    pub async fn seek(&self, player: &str, offset_microseconds: i64) -> Result<()> {
+        let bus_name = Self::player_bus_name(player);
+        let player_proxy = zbus::Proxy::new(
+            &self.connection,
+            bus_name.as_str(),
+            Self::MPRIS_OBJECT_PATH,
+            MPRIS_PLAYER_INTERFACE,
+        )
+        .await
+        .context("Failed to create player proxy")?;
 
-        warn!("set_player_property not yet implemented");
+        player_proxy
+            .call_method("Seek", &(offset_microseconds,))
+            .await
+            .context("Failed to call Seek")?;
+
+        debug!("Seeked {} microseconds on player {}", offset_microseconds, player);
+        Ok(())
+    }
+
+    /// Set absolute position
+    pub async fn set_position(&self, player: &str, track_id: &str, position_microseconds: i64) -> Result<()> {
+        use zbus::zvariant::ObjectPath;
+
+        let bus_name = Self::player_bus_name(player);
+        let player_proxy = zbus::Proxy::new(
+            &self.connection,
+            bus_name.as_str(),
+            Self::MPRIS_OBJECT_PATH,
+            MPRIS_PLAYER_INTERFACE,
+        )
+        .await
+        .context("Failed to create player proxy")?;
+
+        let track_path = ObjectPath::try_from(track_id)?;
+        player_proxy
+            .call_method("SetPosition", &(track_path, position_microseconds))
+            .await
+            .context("Failed to call SetPosition")?;
+
+        debug!("Set position to {} on player {}", position_microseconds, player);
+        Ok(())
+    }
+
+    /// Open URI
+    pub async fn open_uri(&self, player: &str, uri: &str) -> Result<()> {
+        let bus_name = Self::player_bus_name(player);
+        let player_proxy = zbus::Proxy::new(
+            &self.connection,
+            bus_name.as_str(),
+            Self::MPRIS_OBJECT_PATH,
+            MPRIS_PLAYER_INTERFACE,
+        )
+        .await
+        .context("Failed to create player proxy")?;
+
+        player_proxy
+            .call_method("OpenUri", &(uri,))
+            .await
+            .context("Failed to call OpenUri")?;
+
+        debug!("Opened URI {} on player {}", uri, player);
+        Ok(())
+    }
+
+    /// Set volume (0.0 to 1.0+)
+    pub async fn set_volume(&self, player: &str, volume: f64) -> Result<()> {
+        let bus_name = Self::player_bus_name(player);
+        let player_proxy = zbus::Proxy::new(
+            &self.connection,
+            bus_name.as_str(),
+            Self::MPRIS_OBJECT_PATH,
+            MPRIS_PLAYER_INTERFACE,
+        )
+        .await
+        .context("Failed to create player proxy")?;
+
+        player_proxy
+            .set_property("Volume", volume)
+            .await
+            .context("Failed to set Volume")?;
+
+        debug!("Set volume to {} on player {}", volume, player);
+        Ok(())
+    }
+
+    /// Set loop status
+    pub async fn set_loop_status(&self, player: &str, loop_status: LoopStatus) -> Result<()> {
+        let bus_name = Self::player_bus_name(player);
+        let player_proxy = zbus::Proxy::new(
+            &self.connection,
+            bus_name.as_str(),
+            Self::MPRIS_OBJECT_PATH,
+            MPRIS_PLAYER_INTERFACE,
+        )
+        .await
+        .context("Failed to create player proxy")?;
+
+        player_proxy
+            .set_property("LoopStatus", loop_status.as_str())
+            .await
+            .context("Failed to set LoopStatus")?;
+
+        debug!("Set loop status to {} on player {}", loop_status.as_str(), player);
+        Ok(())
+    }
+
+    /// Set shuffle
+    pub async fn set_shuffle(&self, player: &str, shuffle: bool) -> Result<()> {
+        let bus_name = Self::player_bus_name(player);
+        let player_proxy = zbus::Proxy::new(
+            &self.connection,
+            bus_name.as_str(),
+            Self::MPRIS_OBJECT_PATH,
+            MPRIS_PLAYER_INTERFACE,
+        )
+        .await
+        .context("Failed to create player proxy")?;
+
+        player_proxy
+            .set_property("Shuffle", shuffle)
+            .await
+            .context("Failed to set Shuffle")?;
+
+        debug!("Set shuffle to {} on player {}", shuffle, player);
         Ok(())
     }
 
@@ -275,8 +481,8 @@ mod tests {
         assert_eq!(LoopStatus::from_str("None"), LoopStatus::None);
         assert_eq!(LoopStatus::from_str("Track"), LoopStatus::Track);
         assert_eq!(LoopStatus::from_str("Playlist"), LoopStatus::Playlist);
-        assert_eq!(LoopStatus::None.to_string(), "None");
-        assert_eq!(LoopStatus::Track.to_string(), "Track");
+        assert_eq!(LoopStatus::None.as_str(), "None");
+        assert_eq!(LoopStatus::Track.as_str(), "Track");
     }
 
     // Integration tests require DBus session bus

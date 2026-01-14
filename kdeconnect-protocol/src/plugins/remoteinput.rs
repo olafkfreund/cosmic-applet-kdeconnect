@@ -138,21 +138,17 @@ pub struct RemoteInputRequest {
 /// Remote Input plugin for pointer and keyboard control
 pub struct RemoteInputPlugin {
     device_id: Option<String>,
-    keyboard_support: bool,
 }
 
 impl RemoteInputPlugin {
     /// Create a new Remote Input plugin
     pub fn new() -> Self {
-        Self {
-            device_id: None,
-            keyboard_support: true, // COSMIC supports keyboard input
-        }
+        Self { device_id: None }
     }
 
     /// Handle a remote input request packet
     async fn handle_request(&self, packet: &Packet) -> Result<()> {
-        let request: RemoteInputRequest = serde_json::from_value(serde_json::json!(packet.body))
+        let request: RemoteInputRequest = serde_json::from_value(packet.body.clone())
             .map_err(|e| ProtocolError::InvalidPacket(format!("Failed to parse request: {}", e)))?;
 
         // Handle mouse movement
@@ -300,7 +296,7 @@ mod tests {
     async fn test_plugin_creation() {
         let plugin = RemoteInputPlugin::new();
         assert_eq!(plugin.name(), "remoteinput");
-        assert!(plugin.keyboard_support);
+        assert!(plugin.device_id.is_none());
     }
 
     #[tokio::test]
