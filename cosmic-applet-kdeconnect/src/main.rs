@@ -272,9 +272,9 @@ impl cosmic::Application for KdeConnectApplet {
             }
             Message::FindPhone(device_id) => {
                 tracing::info!("Finding phone: {}", device_id);
-                // TODO: Implement find phone via daemon
-                tracing::warn!("Find phone not yet implemented in daemon");
-                Task::none()
+                device_operation_task(device_id, "find phone", |client, id| async move {
+                    client.find_phone(&id).await
+                })
             }
             Message::Surface(action) => {
                 cosmic::task::message(cosmic::Action::Cosmic(cosmic::app::Action::Surface(action)))

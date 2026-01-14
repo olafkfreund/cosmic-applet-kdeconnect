@@ -104,6 +104,9 @@ trait KdeConnect {
     /// Send a ping to a device
     async fn send_ping(&self, device_id: &str, message: &str) -> zbus::Result<()>;
 
+    /// Trigger find phone on a device
+    async fn find_phone(&self, device_id: &str) -> zbus::Result<()>;
+
     /// Share a file with a device
     async fn share_file(&self, device_id: &str, path: &str) -> zbus::Result<()>;
 
@@ -329,6 +332,15 @@ impl DbusClient {
             .send_ping(device_id, message)
             .await
             .context("Failed to send ping")
+    }
+
+    /// Trigger find phone on a device
+    pub async fn find_phone(&self, device_id: &str) -> Result<()> {
+        info!("Triggering find phone for device {}", device_id);
+        self.proxy
+            .find_phone(device_id)
+            .await
+            .context("Failed to trigger find phone")
     }
 
     /// Share a file with a device

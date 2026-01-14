@@ -315,6 +315,41 @@ impl KdeConnectInterface {
         Ok(())
     }
 
+    /// Trigger find phone on a device
+    ///
+    /// # Arguments
+    /// * `device_id` - The device ID to trigger find phone on
+    async fn find_phone(&self, device_id: String) -> Result<(), zbus::fdo::Error> {
+        info!("DBus: FindPhone called for {}", device_id);
+
+        let device_manager = self.device_manager.read().await;
+        let device = device_manager
+            .get_device(&device_id)
+            .ok_or_else(|| zbus::fdo::Error::Failed(format!("Device not found: {}", device_id)))?;
+
+        if !device.is_connected() {
+            return Err(zbus::fdo::Error::Failed("Device not connected".to_string()));
+        }
+
+        drop(device_manager);
+
+        // Create findmyphone packet
+        use kdeconnect_protocol::Packet;
+        use serde_json::json;
+
+        let packet = Packet::new("kdeconnect.findmyphone.request", json!({}));
+
+        // Send packet via ConnectionManager
+        let conn_manager = self.connection_manager.read().await;
+        conn_manager
+            .send_packet(&device_id, &packet)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to send find phone request: {}", e)))?;
+
+        info!("DBus: Find phone request sent successfully to {}", device_id);
+        Ok(())
+    }
+
     /// Share a file with a device
     ///
     /// # Arguments
