@@ -25,12 +25,13 @@ This project consists of:
 - [x] **Active Pairing Flow** (request/accept/reject)
 - [x] **TLS Connection Handling** (per-device connections)
 - [x] **Plugin Packet Routing** (PluginManager with factories)
-- [x] Plugin Architecture with 6 plugins:
+- [x] Plugin Architecture with 7 plugins:
   - [x] Ping Plugin (send/receive pings)
   - [x] **Battery Plugin** (status queries + **low battery alerts**)
   - [x] Notification Plugin (forwarding)
   - [x] **Share Plugin** (file/text/URL - **full TCP transfer**)
   - [x] **Clipboard Plugin** (bidirectional sync with **system integration**)
+  - [x] **RunCommand Plugin** (remote shell command execution - **full implementation**)
   - [x] MPRIS Plugin (media control - protocol only)
 - [x] **Background Daemon Service** (full implementation)
 - [x] **DBus Interface** (complete IPC layer)
@@ -47,7 +48,7 @@ This project consists of:
 - [x] **Low Battery Notifications** (alerts for connected devices)
 - [x] **Pairing Notifications** (timeout and error feedback)
 - [x] COSMIC Panel Applet with Device List UI (mock data)
-- [x] Comprehensive Test Suite (103 tests, 12 integration tests)
+- [x] Comprehensive Test Suite (114 tests, 12 integration tests)
 - [x] CI/CD Pipeline with GitHub Actions
 - [x] Pre-commit hooks for code quality
 
@@ -62,7 +63,6 @@ This project consists of:
 - [ ] MPRIS DBus integration (player discovery and control)
 - [ ] Remote Input
 - [ ] SMS Messaging
-- [ ] Run Commands
 - [ ] Bluetooth Transport
 
 ### Implemented Features
@@ -100,6 +100,13 @@ This project consists of:
   - File transfers
   - Low battery alerts
   - Forwarded device notifications
+- ✅ **Run Commands** - Execute pre-configured shell commands remotely
+  - Pre-configure commands on desktop
+  - Trigger from mobile device
+  - Persistent command storage per device
+  - Non-blocking execution
+  - Security: Only pre-configured commands can be run
+  - Compatible with Android/iOS KDE Connect apps
 - ✅ **Per-device Configuration** - Custom settings per device (nicknames, plugin overrides)
 - ✅ **Plugin Management** - Enable/disable plugins globally and per-device
 - ✅ **Device Pairing** - Full pairing flow with fingerprint verification
@@ -128,6 +135,12 @@ The daemon exposes a comprehensive DBus interface at `com.system76.CosmicKdeConn
 - `ShareUrl(device_id: String, url: String)` - Send URL to device (opens in browser)
 - `SendNotification(device_id: String, title: String, body: String)` - Send notification
 
+**Run Commands:**
+- `AddRunCommand(device_id: String, command_id: String, name: String, command: String)` - Add command
+- `RemoveRunCommand(device_id: String, command_id: String)` - Remove command
+- `GetRunCommands(device_id: String) -> String` - Get all commands (JSON)
+- `ClearRunCommands(device_id: String)` - Clear all commands
+
 **Configuration:**
 - `GetDeviceConfig(device_id: String) -> DeviceConfig` - Get device-specific settings
 - `SetDeviceNickname(device_id: String, nickname: String)` - Set custom device name
@@ -149,6 +162,15 @@ busctl call com.system76.CosmicKdeConnect /com/system76/CosmicKdeConnect com.sys
 
 # Send a ping
 busctl call com.system76.CosmicKdeConnect /com/system76/CosmicKdeConnect com.system76.CosmicKdeConnect SendPing ss "device-id" "Hello!"
+
+# Add a run command
+busctl call com.system76.CosmicKdeConnect /com/system76/CosmicKdeConnect com.system76.CosmicKdeConnect AddRunCommand ssss "device-id" "backup" "Backup Home" "tar -czf ~/backup.tar.gz ~"
+
+# Get all commands (returns JSON)
+busctl call com.system76.CosmicKdeConnect /com/system76/CosmicKdeConnect com.system76.CosmicKdeConnect GetRunCommands s "device-id"
+
+# Remove a command
+busctl call com.system76.CosmicKdeConnect /com/system76/CosmicKdeConnect com.system76.CosmicKdeConnect RemoveRunCommand ss "device-id" "backup"
 ```
 
 ## Architecture
