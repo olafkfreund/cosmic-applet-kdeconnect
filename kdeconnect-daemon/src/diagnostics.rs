@@ -105,7 +105,6 @@ pub enum DiagnosticCommand {
 
 /// Initialize logging based on CLI configuration
 pub fn init_logging(cli: &Cli) -> Result<()> {
-    // Parse log level
     let log_level = cli.log_level.parse::<Level>().with_context(|| {
         format!(
             "Invalid log level '{}'. Valid levels: error, warn, info, debug, trace",
@@ -113,58 +112,25 @@ pub fn init_logging(cli: &Cli) -> Result<()> {
         )
     })?;
 
-    // Create filter
     let filter = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new(log_level.as_str()))
         .context("Failed to create log filter")?;
 
-    // Configure and initialize formatter based on settings
-    if cli.json_logs {
-        // JSON logging
-        if cli.timestamps {
-            fmt()
-                .with_env_filter(filter)
-                .with_target(true)
-                .with_thread_ids(false)
-                .with_thread_names(false)
-                .with_file(true)
-                .with_line_number(true)
-                .json()
-                .init();
-        } else {
-            fmt()
-                .with_env_filter(filter)
-                .with_target(true)
-                .with_thread_ids(false)
-                .with_thread_names(false)
-                .with_file(true)
-                .with_line_number(true)
-                .without_time()
-                .json()
-                .init();
-        }
-    } else {
-        // Normal logging
-        if cli.timestamps {
-            fmt()
-                .with_env_filter(filter)
-                .with_target(true)
-                .with_thread_ids(false)
-                .with_thread_names(false)
-                .with_file(true)
-                .with_line_number(true)
-                .init();
-        } else {
-            fmt()
-                .with_env_filter(filter)
-                .with_target(true)
-                .with_thread_ids(false)
-                .with_thread_names(false)
-                .with_file(true)
-                .with_line_number(true)
-                .without_time()
-                .init();
-        }
+    // Build base formatter configuration
+    let subscriber = fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .with_file(true)
+        .with_line_number(true);
+
+    // Apply format and timestamp options
+    match (cli.json_logs, cli.timestamps) {
+        (true, true) => subscriber.json().init(),
+        (true, false) => subscriber.without_time().json().init(),
+        (false, true) => subscriber.init(),
+        (false, false) => subscriber.without_time().init(),
     }
 
     info!(

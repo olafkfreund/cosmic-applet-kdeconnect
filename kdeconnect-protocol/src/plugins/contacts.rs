@@ -330,9 +330,15 @@ impl PluginFactory for ContactsPluginFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{DeviceInfo, DeviceType};
 
     fn create_test_plugin() -> ContactsPlugin {
         ContactsPlugin::new()
+    }
+
+    fn create_test_device() -> Device {
+        let info = DeviceInfo::new("Test Device", DeviceType::Phone, 1716);
+        Device::from_discovery(info)
     }
 
     #[test]
@@ -367,7 +373,7 @@ mod tests {
     fn test_create_request_vcards() {
         let plugin = create_test_plugin();
         let uids = vec!["contact1".to_string(), "contact2".to_string()];
-        let packet = plugin.create_request_vcards_by_uid(uids.clone());
+        let packet = plugin.create_request_vcards_by_uid(uids);
 
         assert_eq!(packet.packet_type, PACKET_TYPE_REQUEST_VCARDS_BY_UID);
         assert_eq!(
@@ -379,6 +385,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_uids_timestamps_response() {
         let mut plugin = create_test_plugin();
+        let mut device = create_test_device();
 
         let packet = Packet::new(
             PACKET_TYPE_RESPONSE_UIDS_TIMESTAMPS,
@@ -390,7 +397,7 @@ mod tests {
             }),
         );
 
-        plugin.handle_packet(packet).await.unwrap();
+        plugin.handle_packet(&packet, &mut device).await.unwrap();
 
         assert_eq!(plugin.get_contact_count(), 2);
         assert!(plugin.get_all_contact_uids().contains(&"contact1".to_string()));
@@ -400,6 +407,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_vcards_response() {
         let mut plugin = create_test_plugin();
+        let mut device = create_test_device();
 
         let vcard_data = "BEGIN:VCARD\nVERSION:2.1\nFN:John Doe\nTEL:+1234567890\nEND:VCARD";
         let packet = Packet::new(
@@ -411,7 +419,7 @@ mod tests {
             }),
         );
 
-        plugin.handle_packet(packet).await.unwrap();
+        plugin.handle_packet(&packet, &mut device).await.unwrap();
 
         assert_eq!(plugin.vcards_cache.len(), 1);
         assert!(plugin.get_vcard("contact1").is_some());

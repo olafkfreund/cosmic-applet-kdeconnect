@@ -526,10 +526,11 @@ impl PluginManager {
 
     /// Get all outgoing capabilities from registered factories
     pub fn get_all_outgoing_capabilities(&self) -> Vec<String> {
-        let mut capabilities = Vec::new();
-        for factory in self.factories.values() {
-            capabilities.extend(factory.outgoing_capabilities());
-        }
+        let mut capabilities: Vec<String> = self
+            .factories
+            .values()
+            .flat_map(|f| f.outgoing_capabilities())
+            .collect();
         capabilities.sort();
         capabilities.dedup();
         capabilities

@@ -188,16 +188,16 @@ impl Device {
     /// Mark device as connecting
     pub fn mark_connecting(&mut self, host: String, port: u16) {
         self.connection_state = ConnectionState::Connecting;
-        self.host = Some(host.clone());
         self.port = Some(port);
         self.update_last_seen();
         debug!(
             "Device {} ({}) connecting to {}:{}",
             self.id(),
             self.name(),
-            host,
+            &host,
             port
         );
+        self.host = Some(host);
     }
 
     /// Mark device connection as failed
