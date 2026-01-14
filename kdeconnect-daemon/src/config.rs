@@ -107,6 +107,10 @@ pub struct PluginConfig {
     /// Enable Presenter plugin
     #[serde(default = "default_true")]
     pub enable_presenter: bool,
+
+    /// Enable Contacts plugin
+    #[serde(default = "default_true")]
+    pub enable_contacts: bool,
 }
 
 /// Storage paths configuration
@@ -172,6 +176,7 @@ impl Default for PluginConfig {
             enable_findmyphone: true,
             enable_telephony: true,
             enable_presenter: true,
+            enable_contacts: true,
         }
     }
 }

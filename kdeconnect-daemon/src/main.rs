@@ -12,11 +12,11 @@ use kdeconnect_protocol::{
     pairing::{PairingConfig, PairingEvent, PairingService, PairingStatus},
     plugins::{
         battery::BatteryPluginFactory, clipboard::ClipboardPluginFactory,
-        findmyphone::FindMyPhonePluginFactory, mpris::MprisPluginFactory,
-        notification::NotificationPluginFactory, ping::PingPluginFactory,
-        presenter::PresenterPluginFactory, remoteinput::RemoteInputPluginFactory,
-        runcommand::RunCommandPluginFactory, share::SharePluginFactory,
-        telephony::TelephonyPluginFactory, PluginManager,
+        contacts::ContactsPluginFactory, findmyphone::FindMyPhonePluginFactory,
+        mpris::MprisPluginFactory, notification::NotificationPluginFactory,
+        ping::PingPluginFactory, presenter::PresenterPluginFactory,
+        remoteinput::RemoteInputPluginFactory, runcommand::RunCommandPluginFactory,
+        share::SharePluginFactory, telephony::TelephonyPluginFactory, PluginManager,
     },
     CertificateInfo, DeviceInfo, DeviceManager, DeviceType,
 };
@@ -295,6 +295,13 @@ impl Daemon {
             manager
                 .register_factory(Arc::new(PresenterPluginFactory))
                 .context("Failed to register Presenter plugin factory")?;
+        }
+
+        if self.config.plugins.enable_contacts {
+            info!("Registering Contacts plugin factory");
+            manager
+                .register_factory(Arc::new(ContactsPluginFactory))
+                .context("Failed to register Contacts plugin factory")?;
         }
 
         info!(
