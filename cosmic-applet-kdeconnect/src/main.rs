@@ -46,6 +46,7 @@ enum Message {
     RefreshDevices,
     SendPing(String),
     SendFile(String),
+    FileSelected(String, String), // device_id, file_path
     FindPhone(String),
     Surface(cosmic::surface::Action),
     // Daemon responses
@@ -110,6 +111,26 @@ async fn fetch_battery_statuses(device_ids: Vec<String>) -> HashMap<String, dbus
         }
     }
     statuses
+}
+
+/// Opens a file picker dialog and returns device_id and selected file path
+async fn open_file_picker(device_id: String) -> Option<(String, String)> {
+    use ashpd::desktop::file_chooser::OpenFileRequest;
+
+    let response = OpenFileRequest::default()
+        .title("Select file to send")
+        .modal(true)
+        .multiple(false)
+        .send()
+        .await
+        .ok()?
+        .response()
+        .ok()?;
+
+    response
+        .uris()
+        .first()
+        .map(|uri| (device_id, uri.path().to_string()))
 }
 
 /// Creates a task that executes a device operation then refreshes the device list
@@ -266,9 +287,23 @@ impl cosmic::Application for KdeConnectApplet {
             }
             Message::SendFile(device_id) => {
                 tracing::info!("Opening file picker for device: {}", device_id);
-                // TODO: Open file picker and send file via daemon
-                tracing::warn!("File sending not yet implemented");
-                Task::none()
+                Task::perform(open_file_picker(device_id), |result| {
+                    match result {
+                        Some((device_id, path)) => {
+                            cosmic::Action::App(Message::FileSelected(device_id, path))
+                        }
+                        None => {
+                            tracing::debug!("File picker cancelled or no file selected");
+                            cosmic::Action::App(Message::RefreshDevices)
+                        }
+                    }
+                })
+            }
+            Message::FileSelected(device_id, file_path) => {
+                tracing::info!("Sending file {} to device: {}", file_path, device_id);
+                device_operation_task(device_id, "share file", move |client, id| async move {
+                    client.share_file(&id, &file_path).await
+                })
             }
             Message::FindPhone(device_id) => {
                 tracing::info!("Finding phone: {}", device_id);

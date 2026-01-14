@@ -67,6 +67,7 @@ ring = "0.17"
 
 # System Integration
 keyring = "3.0"
+ashpd = "0.12"
 
 # Configuration
 toml = "0.9"

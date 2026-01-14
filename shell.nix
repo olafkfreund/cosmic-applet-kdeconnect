@@ -22,8 +22,9 @@ let
     pixman
     libinput
     libxcb
-    xcb-util-wm
-    xcb-util-image
+    xorg.xcbutil
+    xorg.xcbutilwm
+    xorg.xcbutilimage
     libdrm
     fontconfig
     freetype

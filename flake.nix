@@ -41,8 +41,9 @@
           pixman
           libinput
           libxcb
-          xcb-util-wm
-          xcb-util-image
+          xorg.xcbutil
+          xorg.xcbutilwm
+          xorg.xcbutilimage
           libdrm
           fontconfig
           freetype
@@ -62,12 +63,9 @@
           
           # COSMIC specific
           libxkbcommon
-          libwayland
+          wayland
           libinput
-          
-          # TLS/Crypto
-          rustls
-          
+
           # Development tools
           git
           gnumake
