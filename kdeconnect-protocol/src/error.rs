@@ -323,6 +323,239 @@ pub enum ProtocolError {
     /// ```
     #[error("Plugin error: {0}")]
     Plugin(String),
+
+    /// Network connection error
+    ///
+    /// This error occurs when a network connection fails or is interrupted.
+    #[error("Network error: {0}")]
+    NetworkError(String),
+
+    /// Connection timeout
+    ///
+    /// This error occurs when a network operation times out.
+    #[error("Connection timeout: {0}")]
+    Timeout(String),
+
+    /// Connection refused
+    ///
+    /// This error occurs when a connection attempt is actively refused by the remote device.
+    #[error("Connection refused: {0}")]
+    ConnectionRefused(String),
+
+    /// Network unreachable
+    ///
+    /// This error occurs when the network is unreachable (no route to host).
+    #[error("Network unreachable: {0}")]
+    NetworkUnreachable(String),
+
+    /// Protocol version mismatch
+    ///
+    /// This error occurs when devices use incompatible protocol versions.
+    #[error("Protocol version mismatch: {0}")]
+    ProtocolVersionMismatch(String),
+
+    /// Configuration error
+    ///
+    /// This error occurs when configuration is invalid or missing.
+    #[error("Configuration error: {0}")]
+    Configuration(String),
+
+    /// Resource exhausted
+    ///
+    /// This error occurs when system resources are exhausted (disk full, memory pressure, etc.).
+    #[error("Resource exhausted: {0}")]
+    ResourceExhausted(String),
+
+    /// Permission denied
+    ///
+    /// This error occurs when an operation fails due to insufficient permissions.
+    #[error("Permission denied: {0}")]
+    PermissionDenied(String),
+
+    /// Operation cancelled
+    ///
+    /// This error occurs when an operation is explicitly cancelled.
+    #[error("Operation cancelled: {0}")]
+    Cancelled(String),
+
+    /// Packet size exceeded
+    ///
+    /// This error occurs when a packet exceeds maximum allowed size (DoS prevention).
+    #[error("Packet size exceeded: {0} bytes (max: {1})")]
+    PacketSizeExceeded(usize, usize),
+}
+
+impl ProtocolError {
+    /// Convert a generic I/O error into a more specific network error
+    ///
+    /// This method examines the error kind and returns a more specific
+    /// error variant when possible, providing better error messages to users.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use kdeconnect_protocol::ProtocolError;
+    /// use std::io::{Error, ErrorKind};
+    ///
+    /// let io_error = Error::new(ErrorKind::TimedOut, "connection timeout");
+    /// let error = ProtocolError::from_io_error(io_error, "connecting to device");
+    ///
+    /// assert!(matches!(error, ProtocolError::Timeout(_)));
+    /// ```
+    pub fn from_io_error(error: std::io::Error, context: &str) -> Self {
+        use std::io::ErrorKind;
+
+        match error.kind() {
+            ErrorKind::TimedOut => {
+                ProtocolError::Timeout(format!("{}: {}", context, error))
+            }
+            ErrorKind::ConnectionRefused => {
+                ProtocolError::ConnectionRefused(format!("{}: {}", context, error))
+            }
+            ErrorKind::NetworkUnreachable => {
+                ProtocolError::NetworkUnreachable(format!("{}: {}", context, error))
+            }
+            ErrorKind::PermissionDenied => {
+                ProtocolError::PermissionDenied(format!("{}: {}", context, error))
+            }
+            ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted | ErrorKind::BrokenPipe => {
+                ProtocolError::NetworkError(format!("{}: connection interrupted ({})", context, error))
+            }
+            _ => ProtocolError::Io(error),
+        }
+    }
+
+    /// Check if this error is recoverable (transient error that can be retried)
+    ///
+    /// Returns `true` if the error might succeed on retry, `false` if it's permanent.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use kdeconnect_protocol::ProtocolError;
+    ///
+    /// let error = ProtocolError::Timeout("connection timeout".to_string());
+    /// assert!(error.is_recoverable()); // Timeout can be retried
+    ///
+    /// let error = ProtocolError::NotPaired;
+    /// assert!(!error.is_recoverable()); // Device needs to be paired first
+    /// ```
+    pub fn is_recoverable(&self) -> bool {
+        matches!(
+            self,
+            ProtocolError::Timeout(_)
+                | ProtocolError::NetworkError(_)
+                | ProtocolError::NetworkUnreachable(_)
+                | ProtocolError::ConnectionRefused(_)
+                | ProtocolError::Io(_)
+        )
+    }
+
+    /// Check if this error requires user action
+    ///
+    /// Returns `true` if the error cannot be resolved automatically and requires
+    /// user intervention.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use kdeconnect_protocol::ProtocolError;
+    ///
+    /// let error = ProtocolError::NotPaired;
+    /// assert!(error.requires_user_action()); // User needs to pair device
+    ///
+    /// let error = ProtocolError::Timeout("connection timeout".to_string());
+    /// assert!(!error.requires_user_action()); // Can be retried automatically
+    /// ```
+    pub fn requires_user_action(&self) -> bool {
+        matches!(
+            self,
+            ProtocolError::NotPaired
+                | ProtocolError::Certificate(_)
+                | ProtocolError::CertificateValidation(_)
+                | ProtocolError::PermissionDenied(_)
+                | ProtocolError::Configuration(_)
+                | ProtocolError::ProtocolVersionMismatch(_)
+        )
+    }
+
+    /// Get a user-friendly error message suitable for display in UI
+    ///
+    /// This method returns a simplified, actionable error message that can be
+    /// shown to users in notifications or error dialogs.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use kdeconnect_protocol::ProtocolError;
+    ///
+    /// let error = ProtocolError::NotPaired;
+    /// assert_eq!(
+    ///     error.user_message(),
+    ///     "Device not paired. Please pair the device first."
+    /// );
+    /// ```
+    pub fn user_message(&self) -> String {
+        match self {
+            ProtocolError::NotPaired => {
+                "Device not paired. Please pair the device first.".to_string()
+            }
+            ProtocolError::DeviceNotFound(id) => {
+                format!("Device '{}' not found. Check if the device is connected.", id)
+            }
+            ProtocolError::Timeout(msg) => {
+                format!("Connection timeout: {}. Check network connection.", msg)
+            }
+            ProtocolError::ConnectionRefused(_) => {
+                "Connection refused. Check if KDE Connect is running on the device.".to_string()
+            }
+            ProtocolError::NetworkUnreachable(_) => {
+                "Network unreachable. Check if both devices are on the same network.".to_string()
+            }
+            ProtocolError::NetworkError(msg) => {
+                format!("Network error: {}. Connection may be unstable.", msg)
+            }
+            ProtocolError::PermissionDenied(msg) => {
+                format!("Permission denied: {}. Check file and directory permissions.", msg)
+            }
+            ProtocolError::ResourceExhausted(msg) => {
+                format!("Resource exhausted: {}. Free up space and try again.", msg)
+            }
+            ProtocolError::Configuration(msg) => {
+                format!("Configuration error: {}. Check your settings.", msg)
+            }
+            ProtocolError::ProtocolVersionMismatch(msg) => {
+                format!("Incompatible protocol version: {}. Update both applications.", msg)
+            }
+            ProtocolError::CertificateValidation(msg) => {
+                format!("Certificate validation failed: {}. You may need to re-pair.", msg)
+            }
+            ProtocolError::PacketSizeExceeded(size, max) => {
+                format!("Packet too large ({} bytes, max {} bytes). Try sending smaller files.", size, max)
+            }
+            ProtocolError::InvalidPacket(msg) => {
+                format!("Invalid data received: {}.", msg)
+            }
+            ProtocolError::Plugin(msg) => {
+                format!("Plugin error: {}.", msg)
+            }
+            ProtocolError::Cancelled(msg) => {
+                format!("Operation cancelled: {}.", msg)
+            }
+            ProtocolError::Io(e) => {
+                format!("I/O error: {}.", e)
+            }
+            ProtocolError::Json(e) => {
+                format!("Data format error: {}.", e)
+            }
+            ProtocolError::Tls(e) => {
+                format!("Secure connection error: {}.", e)
+            }
+            ProtocolError::Certificate(e) => {
+                format!("Certificate error: {}. You may need to re-pair.", e)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

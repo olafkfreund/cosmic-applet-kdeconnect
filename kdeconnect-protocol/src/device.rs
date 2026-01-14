@@ -272,7 +272,9 @@ impl DeviceManager {
 
         // Ensure parent directory exists
         if let Some(parent) = registry_path.parent() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent).map_err(|e| {
+                ProtocolError::from_io_error(e, &format!("creating registry directory {:?}", parent))
+            })?;
         }
 
         let mut manager = Self {
@@ -428,7 +430,12 @@ impl DeviceManager {
     /// Save device registry to disk
     pub fn save_registry(&self) -> Result<()> {
         let json = serde_json::to_string_pretty(&self.devices)?;
-        fs::write(&self.registry_path, json)?;
+        fs::write(&self.registry_path, &json).map_err(|e| {
+            ProtocolError::from_io_error(
+                e,
+                &format!("writing device registry to {:?}", self.registry_path),
+            )
+        })?;
         debug!("Saved device registry to {:?}", self.registry_path);
         Ok(())
     }
@@ -440,7 +447,12 @@ impl DeviceManager {
             return Ok(());
         }
 
-        let json = fs::read_to_string(&self.registry_path)?;
+        let json = fs::read_to_string(&self.registry_path).map_err(|e| {
+            ProtocolError::from_io_error(
+                e,
+                &format!("reading device registry from {:?}", self.registry_path),
+            )
+        })?;
         self.devices = serde_json::from_str(&json)?;
         info!("Loaded {} devices from registry", self.devices.len());
         Ok(())

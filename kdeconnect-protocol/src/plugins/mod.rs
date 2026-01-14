@@ -636,12 +636,32 @@ impl PluginManager {
         match plugin.handle_packet(packet, device).await {
             Ok(()) => Ok(()),
             Err(e) => {
-                error!(
-                    "Plugin {} failed to handle packet {} for device {}: {}",
-                    plugin_name, packet_type, device_id, e
-                );
-                // Return error for critical failures, but plugin continues to exist
-                Err(e)
+                // Check if error is recoverable
+                if e.is_recoverable() {
+                    // Log recoverable errors but don't propagate
+                    warn!(
+                        "Plugin {} encountered recoverable error handling packet {} for device {}: {}",
+                        plugin_name, packet_type, device_id, e
+                    );
+                    // Plugin continues to function
+                    Ok(())
+                } else if e.requires_user_action() {
+                    // User action required - log with appropriate level
+                    warn!(
+                        "Plugin {} requires user action for packet {} on device {}: {}",
+                        plugin_name, packet_type, device_id, e.user_message()
+                    );
+                    // Don't crash the plugin, but return error for UI notification
+                    Err(e)
+                } else {
+                    // Critical error - plugin may be in bad state
+                    error!(
+                        "Plugin {} critically failed handling packet {} for device {}: {}",
+                        plugin_name, packet_type, device_id, e
+                    );
+                    // Propagate critical errors
+                    Err(e)
+                }
             }
         }
     }
