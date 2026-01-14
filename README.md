@@ -14,7 +14,7 @@ This project consists of:
 
 ## Features
 
-### Current Status: 🚧 In Development (~75% Complete)
+### Current Status: 🚧 In Development (~85% Complete)
 
 #### Completed ✅
 - [x] Core Protocol Library (v7/8)
@@ -29,7 +29,7 @@ This project consists of:
   - [x] Ping Plugin (send/receive pings)
   - [x] Battery Plugin (status queries)
   - [x] Notification Plugin (forwarding)
-  - [x] Share Plugin (file/text/URL - protocol only)
+  - [x] **Share Plugin** (file/text/URL - **full TCP transfer**)
   - [x] Clipboard Plugin (sync - protocol only)
   - [x] MPRIS Plugin (media control - protocol only)
 - [x] **Background Daemon Service** (full implementation)
@@ -37,6 +37,10 @@ This project consists of:
 - [x] **COSMIC Notifications Integration** (freedesktop.org)
 - [x] **Per-Device Configuration System** (JSON persistence)
 - [x] **Pairing Control via DBus** (pair/unpair methods)
+- [x] **TCP Payload Transfer** (bidirectional file sharing)
+- [x] **File Sharing via DBus** (share_file method)
+- [x] **Automatic File Reception** (downloads to ~/Downloads)
+- [x] **File Transfer Notifications** (COSMIC Desktop integration)
 - [x] COSMIC Panel Applet with Device List UI (mock data)
 - [x] Comprehensive Test Suite (103 tests, 12 integration tests)
 - [x] CI/CD Pipeline with GitHub Actions
@@ -44,12 +48,12 @@ This project consists of:
 
 #### In Progress 🔨
 - [ ] **UI Integration** (blocked by build environment)
-- [ ] **TCP Payload Transfer** (for file sharing)
 - [ ] **Advanced Plugin Features** (clipboard monitoring, MPRIS detection, etc.)
 
 #### Planned 📋
 - [ ] Real device testing (requires Android/iOS device)
-- [ ] File Transfer UI and execution
+- [ ] File Transfer UI (file picker integration)
+- [ ] Transfer progress tracking and cancellation
 - [ ] Clipboard system integration
 - [ ] MPRIS DBus integration
 - [ ] Battery threshold alerts
@@ -60,7 +64,14 @@ This project consists of:
 
 ### Implemented Features
 
-- ✅ **COSMIC Notifications** - Desktop notifications for pings, pairing requests, device events
+- ✅ **File Sharing** - Bidirectional file transfers with TCP payload streaming
+  - Send files via DBus: `ShareFile` method
+  - Automatic file reception to ~/Downloads
+  - 64KB streaming buffer for efficiency
+  - COSMIC Desktop notifications for received files
+  - Port range: 1739-1764 (KDE Connect standard)
+  - Compatible with Android/iOS KDE Connect apps
+- ✅ **COSMIC Notifications** - Desktop notifications for pings, pairing requests, device events, file transfers
 - ✅ **Per-device Configuration** - Custom settings per device (nicknames, plugin overrides)
 - ✅ **Plugin Management** - Enable/disable plugins globally and per-device
 - ✅ **Device Pairing** - Full pairing flow with fingerprint verification
