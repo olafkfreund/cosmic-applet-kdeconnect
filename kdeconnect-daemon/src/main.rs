@@ -2,6 +2,7 @@ mod config;
 mod cosmic_notifications;
 mod dbus;
 mod device_config;
+mod mpris_manager;
 
 use anyhow::{Context, Result};
 use dbus::DbusServer;
