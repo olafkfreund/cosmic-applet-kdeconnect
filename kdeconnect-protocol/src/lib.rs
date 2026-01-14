@@ -30,7 +30,8 @@ pub use plugins::{Plugin, PluginManager};
 pub use transport::{TcpConnection, TlsConnection, TlsServer};
 
 /// Protocol version we implement
-pub const PROTOCOL_VERSION: u32 = 7;
+/// Updated to version 8 to match latest KDE Connect Android app
+pub const PROTOCOL_VERSION: u32 = 8;
 
 #[cfg(test)]
 mod tests {

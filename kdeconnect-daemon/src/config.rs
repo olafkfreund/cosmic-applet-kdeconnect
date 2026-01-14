@@ -165,18 +165,22 @@ impl Default for NetworkConfig {
 impl Default for PluginConfig {
     fn default() -> Self {
         Self {
+            // Core plugins - always enabled
             enable_ping: true,
             enable_battery: true,
             enable_notification: true,
             enable_share: true,
             enable_clipboard: true,
             enable_mpris: true,
-            enable_runcommand: true,
-            enable_remoteinput: true,
-            enable_findmyphone: true,
-            enable_telephony: true,
-            enable_presenter: true,
-            enable_contacts: true,
+
+            // Advanced plugins - disabled by default to reduce discovery packet size
+            // These can be enabled in config if needed
+            enable_runcommand: false,     // Security: command execution should be opt-in
+            enable_remoteinput: true,     // Keep enabled - useful for presentations
+            enable_findmyphone: true,     // Keep enabled - emergency feature
+            enable_telephony: false,      // Reduce packet size - can be enabled if needed
+            enable_presenter: false,      // Specialized use case - reduce packet size
+            enable_contacts: false,       // Reduce packet size - can be enabled if needed
         }
     }
 }
