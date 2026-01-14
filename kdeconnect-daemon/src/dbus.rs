@@ -896,6 +896,98 @@ impl KdeConnectInterface {
         Ok(())
     }
 
+    /// Get list of available MPRIS media players
+    ///
+    /// Returns list of player names that can be controlled.
+    async fn get_mpris_players(&self) -> Result<Vec<String>, zbus::fdo::Error> {
+        debug!("DBus: GetMprisPlayers called");
+
+        let Some(mpris_manager) = &self.mpris_manager else {
+            return Ok(Vec::new());
+        };
+
+        let players = mpris_manager.get_player_list().await;
+        info!("DBus: Found {} MPRIS players", players.len());
+        Ok(players)
+    }
+
+    /// Control MPRIS player playback
+    ///
+    /// # Arguments
+    /// * `player` - Player name (e.g., "spotify", "vlc")
+    /// * `action` - Action: "Play", "Pause", "PlayPause", "Stop", "Next", "Previous"
+    async fn mpris_control(&self, player: String, action: String) -> Result<(), zbus::fdo::Error> {
+        info!("DBus: MprisControl called: {} - {}", player, action);
+
+        let Some(mpris_manager) = &self.mpris_manager else {
+            return Err(zbus::fdo::Error::Failed(
+                "MPRIS manager not available".to_string(),
+            ));
+        };
+
+        mpris_manager
+            .call_player_method(&player, &action)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("MPRIS control failed: {}", e)))?;
+
+        info!("DBus: MPRIS control {} executed for {}", action, player);
+        Ok(())
+    }
+
+    /// Set MPRIS player volume
+    ///
+    /// # Arguments
+    /// * `player` - Player name
+    /// * `volume` - Volume level (0.0 to 1.0)
+    async fn mpris_set_volume(&self, player: String, volume: f64) -> Result<(), zbus::fdo::Error> {
+        info!("DBus: MprisSetVolume called: {} - {}", player, volume);
+
+        let Some(mpris_manager) = &self.mpris_manager else {
+            return Err(zbus::fdo::Error::Failed(
+                "MPRIS manager not available".to_string(),
+            ));
+        };
+
+        let clamped_volume = volume.clamp(0.0, 1.0);
+        mpris_manager
+            .set_volume(&player, clamped_volume)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to set volume: {}", e)))?;
+
+        info!("DBus: Volume set to {} for {}", clamped_volume, player);
+        Ok(())
+    }
+
+    /// Seek MPRIS player position
+    ///
+    /// # Arguments
+    /// * `player` - Player name
+    /// * `offset_microseconds` - Seek offset in microseconds (can be negative)
+    async fn mpris_seek(
+        &self,
+        player: String,
+        offset_microseconds: i64,
+    ) -> Result<(), zbus::fdo::Error> {
+        info!(
+            "DBus: MprisSeek called: {} - {}μs",
+            player, offset_microseconds
+        );
+
+        let Some(mpris_manager) = &self.mpris_manager else {
+            return Err(zbus::fdo::Error::Failed(
+                "MPRIS manager not available".to_string(),
+            ));
+        };
+
+        mpris_manager
+            .seek(&player, offset_microseconds)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Seek failed: {}", e)))?;
+
+        info!("DBus: Seek executed for {}", player);
+        Ok(())
+    }
+
     /// Signal: Device was added (discovered)
     ///
     /// Emitted when a new device is discovered on the network.

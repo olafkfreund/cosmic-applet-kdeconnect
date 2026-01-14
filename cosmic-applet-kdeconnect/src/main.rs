@@ -35,6 +35,8 @@ struct KdeConnectApplet {
     popup: Option<window::Id>,
     devices: Vec<DeviceState>,
     dbus_client: Option<DbusClient>,
+    mpris_players: Vec<String>,
+    selected_player: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +54,12 @@ enum Message {
     // Daemon responses
     DeviceListUpdated(HashMap<String, dbus_client::DeviceInfo>),
     BatteryStatusesUpdated(HashMap<String, dbus_client::BatteryStatus>),
+    // MPRIS control
+    MprisPlayersUpdated(Vec<String>),
+    MprisPlayerSelected(String),
+    MprisControl(String, String), // player, action
+    MprisSetVolume(String, f64),  // player, volume
+    MprisSeek(String, i64),       // player, offset_microseconds
 }
 
 /// Fetches device list from the daemon via D-Bus
@@ -111,6 +119,25 @@ async fn fetch_battery_statuses(device_ids: Vec<String>) -> HashMap<String, dbus
         }
     }
     statuses
+}
+
+/// Fetches list of available MPRIS media players
+async fn fetch_mpris_players() -> Vec<String> {
+    let Ok((client, _)) = DbusClient::connect().await else {
+        tracing::warn!("Failed to connect to daemon for MPRIS players");
+        return Vec::new();
+    };
+
+    match client.get_mpris_players().await {
+        Ok(players) => {
+            tracing::info!("Fetched {} MPRIS players", players.len());
+            players
+        }
+        Err(e) => {
+            tracing::error!("Failed to get MPRIS players: {}", e);
+            Vec::new()
+        }
+    }
 }
 
 /// Opens a file picker dialog and returns device_id and selected file path
@@ -206,6 +233,8 @@ impl cosmic::Application for KdeConnectApplet {
             popup: None,
             devices: Vec::new(),
             dbus_client: None,
+            mpris_players: Vec::new(),
+            selected_player: None,
         };
         (app, Task::none())
     }
@@ -227,8 +256,13 @@ impl cosmic::Application for KdeConnectApplet {
                 Task::none()
             }
             Message::PopupOpened => {
-                tracing::info!("Popup opened, fetching devices");
-                fetch_devices_task()
+                tracing::info!("Popup opened, fetching devices and MPRIS players");
+                Task::batch(vec![
+                    fetch_devices_task(),
+                    Task::perform(fetch_mpris_players(), |players| {
+                        cosmic::Action::App(Message::MprisPlayersUpdated(players))
+                    }),
+                ])
             }
             Message::DeviceListUpdated(devices) => {
                 tracing::info!("Device list updated: {} devices", devices.len());
@@ -310,6 +344,59 @@ impl cosmic::Application for KdeConnectApplet {
                 device_operation_task(device_id, "find phone", |client, id| async move {
                     client.find_phone(&id).await
                 })
+            }
+            Message::MprisPlayersUpdated(players) => {
+                tracing::info!("MPRIS players updated: {} players", players.len());
+                self.mpris_players = players;
+                // Auto-select first player if none selected
+                if self.selected_player.is_none() && !self.mpris_players.is_empty() {
+                    self.selected_player = Some(self.mpris_players[0].clone());
+                }
+                Task::none()
+            }
+            Message::MprisPlayerSelected(player) => {
+                tracing::info!("MPRIS player selected: {}", player);
+                self.selected_player = Some(player);
+                Task::none()
+            }
+            Message::MprisControl(player, action) => {
+                tracing::info!("MPRIS control: {} on {}", action, player);
+                Task::perform(
+                    async move {
+                        if let Ok((client, _)) = DbusClient::connect().await {
+                            if let Err(e) = client.mpris_control(&player, &action).await {
+                                tracing::error!("Failed to control MPRIS player: {}", e);
+                            }
+                        }
+                    },
+                    |_| cosmic::Action::None,
+                )
+            }
+            Message::MprisSetVolume(player, volume) => {
+                tracing::info!("MPRIS set volume: {} to {}", player, volume);
+                Task::perform(
+                    async move {
+                        if let Ok((client, _)) = DbusClient::connect().await {
+                            if let Err(e) = client.mpris_set_volume(&player, volume).await {
+                                tracing::error!("Failed to set MPRIS volume: {}", e);
+                            }
+                        }
+                    },
+                    |_| cosmic::Action::None,
+                )
+            }
+            Message::MprisSeek(player, offset) => {
+                tracing::info!("MPRIS seek: {} by {}μs", player, offset);
+                Task::perform(
+                    async move {
+                        if let Ok((client, _)) = DbusClient::connect().await {
+                            if let Err(e) = client.mpris_seek(&player, offset).await {
+                                tracing::error!("Failed to seek MPRIS player: {}", e);
+                            }
+                        }
+                    },
+                    |_| cosmic::Action::None,
+                )
             }
             Message::Surface(action) => {
                 cosmic::task::message(cosmic::Action::Cosmic(cosmic::app::Action::Surface(action)))
@@ -399,6 +486,9 @@ impl KdeConnectApplet {
         .align_y(cosmic::iced::Alignment::Center)
         .width(Length::Fill);
 
+        // MPRIS media controls section
+        let mpris_section = self.mpris_controls_view();
+
         let content = if self.devices.is_empty() {
             column![
                 text("No devices found").size(14),
@@ -422,6 +512,8 @@ impl KdeConnectApplet {
                 .padding(Padding::from([8.0, 12.0]))
                 .width(Length::Fill),
             divider::horizontal::default(),
+            mpris_section,
+            divider::horizontal::default(),
             scrollable(content).height(Length::Fill),
         ]
         .width(Length::Fill);
@@ -431,6 +523,59 @@ impl KdeConnectApplet {
             .width(Length::Fill)
             .height(Length::Shrink)
             .into()
+    }
+
+    fn mpris_controls_view(&self) -> Element<'_, Message> {
+        // If no players available, return empty container
+        if self.mpris_players.is_empty() {
+            return container(text("").size(0))
+                .height(Length::Fixed(0.0))
+                .into();
+        }
+
+        let Some(selected_player) = &self.selected_player else {
+            return container(text("").size(0))
+                .height(Length::Fixed(0.0))
+                .into();
+        };
+
+        // Player name/label
+        let player_name = row![
+            icon::from_name("multimedia-player-symbolic").size(16),
+            text(selected_player).size(13),
+        ]
+        .spacing(6)
+        .align_y(cosmic::iced::Alignment::Center);
+
+        // Playback controls
+        let controls = row![
+            button::icon(icon::from_name("media-skip-backward-symbolic").size(16))
+                .on_press(Message::MprisControl(
+                    selected_player.clone(),
+                    "Previous".to_string()
+                ))
+                .padding(6),
+            button::icon(icon::from_name("media-playback-start-symbolic").size(16))
+                .on_press(Message::MprisControl(
+                    selected_player.clone(),
+                    "PlayPause".to_string()
+                ))
+                .padding(6),
+            button::icon(icon::from_name("media-playback-stop-symbolic").size(16))
+                .on_press(Message::MprisControl(selected_player.clone(), "Stop".to_string()))
+                .padding(6),
+            button::icon(icon::from_name("media-skip-forward-symbolic").size(16))
+                .on_press(Message::MprisControl(selected_player.clone(), "Next".to_string()))
+                .padding(6),
+        ]
+        .spacing(4)
+        .align_y(cosmic::iced::Alignment::Center);
+
+        let content = column![player_name, controls]
+            .spacing(8)
+            .padding(Padding::from([8.0, 12.0]));
+
+        container(content).width(Length::Fill).into()
     }
 
     fn device_row<'a>(&self, device_state: &'a DeviceState) -> Element<'a, Message> {

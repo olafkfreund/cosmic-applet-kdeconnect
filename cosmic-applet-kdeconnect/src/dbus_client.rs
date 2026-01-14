@@ -120,6 +120,18 @@ trait KdeConnect {
     /// Get battery status from a device
     async fn get_battery_status(&self, device_id: &str) -> zbus::Result<BatteryStatus>;
 
+    /// Get list of available MPRIS media players
+    async fn get_mpris_players(&self) -> zbus::Result<Vec<String>>;
+
+    /// Control MPRIS player playback
+    async fn mpris_control(&self, player: &str, action: &str) -> zbus::Result<()>;
+
+    /// Set MPRIS player volume
+    async fn mpris_set_volume(&self, player: &str, volume: f64) -> zbus::Result<()>;
+
+    /// Seek MPRIS player position
+    async fn mpris_seek(&self, player: &str, offset_microseconds: i64) -> zbus::Result<()>;
+
     /// Signal: Device was added
     #[zbus(signal)]
     fn device_added(device_id: &str, device_info: DeviceInfo) -> zbus::Result<()>;
@@ -377,6 +389,54 @@ impl DbusClient {
             .get_battery_status(device_id)
             .await
             .context("Failed to get battery status")
+    }
+
+    /// Get list of available MPRIS media players
+    pub async fn get_mpris_players(&self) -> Result<Vec<String>> {
+        debug!("Getting MPRIS player list");
+        self.proxy
+            .get_mpris_players()
+            .await
+            .context("Failed to get MPRIS players")
+    }
+
+    /// Control MPRIS player playback
+    ///
+    /// # Arguments
+    /// * `player` - Player name (e.g., "spotify", "vlc")
+    /// * `action` - Action: "Play", "Pause", "PlayPause", "Stop", "Next", "Previous"
+    pub async fn mpris_control(&self, player: &str, action: &str) -> Result<()> {
+        info!("Sending MPRIS control {} to player {}", action, player);
+        self.proxy
+            .mpris_control(player, action)
+            .await
+            .context("Failed to control MPRIS player")
+    }
+
+    /// Set MPRIS player volume
+    ///
+    /// # Arguments
+    /// * `player` - Player name
+    /// * `volume` - Volume level (0.0 to 1.0)
+    pub async fn mpris_set_volume(&self, player: &str, volume: f64) -> Result<()> {
+        info!("Setting MPRIS volume to {} for player {}", volume, player);
+        self.proxy
+            .mpris_set_volume(player, volume)
+            .await
+            .context("Failed to set MPRIS volume")
+    }
+
+    /// Seek MPRIS player position
+    ///
+    /// # Arguments
+    /// * `player` - Player name
+    /// * `offset_microseconds` - Seek offset in microseconds (can be negative)
+    pub async fn mpris_seek(&self, player: &str, offset_microseconds: i64) -> Result<()> {
+        info!("Seeking MPRIS player {} by {}μs", player, offset_microseconds);
+        self.proxy
+            .mpris_seek(player, offset_microseconds)
+            .await
+            .context("Failed to seek MPRIS player")
     }
 
     /// Check if daemon is available
