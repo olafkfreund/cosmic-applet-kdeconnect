@@ -9,7 +9,7 @@ use cosmic::widget::{self, nav_bar};
 use cosmic::{Application, Element};
 use std::collections::HashMap;
 
-use dbus_client::DbusClient;
+use dbus_client::{DaemonEvent, DbusClient};
 
 fn main() -> cosmic::iced::Result {
     tracing_subscriber::fmt::init();
@@ -22,6 +22,29 @@ enum Page {
     Devices,
     Transfers,
     Settings,
+}
+
+/// Transfer status
+#[derive(Debug, Clone, PartialEq)]
+enum TransferStatus {
+    Active,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+/// File transfer tracking
+#[derive(Debug, Clone)]
+struct Transfer {
+    id: String,
+    device_id: String,
+    device_name: String,
+    filename: String,
+    bytes_transferred: u64,
+    total_bytes: u64,
+    direction: String, // "sending" or "receiving"
+    status: TransferStatus,
+    error_message: Option<String>,
 }
 
 impl Page {
@@ -50,6 +73,7 @@ struct KdeConnectApp {
     devices: HashMap<String, dbus_client::DeviceInfo>,
     dbus_client: Option<DbusClient>,
     selected_device_id: Option<String>,
+    transfers: HashMap<String, Transfer>,
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +89,20 @@ enum Message {
     FindPhone(String),
     SendFile(String),
     ShareText(String),
+    // DBus event
+    DaemonEvent(DaemonEvent),
+    // Transfer events
+    TransferStarted(Transfer),
+    TransferProgress {
+        transfer_id: String,
+        bytes_transferred: u64,
+        total_bytes: u64,
+    },
+    TransferComplete {
+        transfer_id: String,
+        success: bool,
+        error_message: String,
+    },
 }
 
 impl Application for KdeConnectApp {
@@ -100,6 +138,7 @@ impl Application for KdeConnectApp {
             devices: HashMap::new(),
             dbus_client: None,
             selected_device_id: None,
+            transfers: HashMap::new(),
         };
 
         // Load devices on startup
@@ -188,8 +227,122 @@ impl Application for KdeConnectApp {
                 // TODO: Open text input dialog
                 Task::none()
             }
+            Message::DaemonEvent(event) => {
+                match event {
+                    DaemonEvent::TransferProgress {
+                        transfer_id,
+                        device_id,
+                        filename,
+                        bytes_transferred,
+                        total_bytes,
+                        direction,
+                    } => {
+                        // Get or create transfer
+                        if !self.transfers.contains_key(&transfer_id) {
+                            // Create new transfer
+                            let device_name = self
+                                .devices
+                                .get(&device_id)
+                                .map(|d| d.name.clone())
+                                .unwrap_or_else(|| "Unknown Device".to_string());
+
+                            let transfer = Transfer {
+                                id: transfer_id.clone(),
+                                device_id: device_id.clone(),
+                                device_name,
+                                filename: filename.clone(),
+                                bytes_transferred,
+                                total_bytes,
+                                direction: direction.clone(),
+                                status: TransferStatus::Active,
+                                error_message: None,
+                            };
+                            self.transfers.insert(transfer_id.clone(), transfer);
+                        } else {
+                            // Update existing transfer
+                            if let Some(transfer) = self.transfers.get_mut(&transfer_id) {
+                                transfer.bytes_transferred = bytes_transferred;
+                                transfer.total_bytes = total_bytes;
+                            }
+                        }
+                    }
+                    DaemonEvent::TransferComplete {
+                        transfer_id,
+                        success,
+                        error_message,
+                        ..
+                    } => {
+                        if let Some(transfer) = self.transfers.get_mut(&transfer_id) {
+                            transfer.status = if success {
+                                TransferStatus::Completed
+                            } else {
+                                TransferStatus::Failed
+                            };
+                            if !error_message.is_empty() {
+                                transfer.error_message = Some(error_message);
+                            }
+                        }
+                    }
+                    DaemonEvent::DeviceAdded { device_id, device_info } => {
+                        tracing::info!("Device added: {}", device_id);
+                        self.devices.insert(device_id, device_info);
+                    }
+                    DaemonEvent::DeviceRemoved { device_id } => {
+                        tracing::info!("Device removed: {}", device_id);
+                        self.devices.remove(&device_id);
+                    }
+                    DaemonEvent::DeviceStateChanged { device_id, state } => {
+                        tracing::info!("Device {} state changed to: {}", device_id, state);
+                        // Refresh devices to get updated state
+                        return Task::perform(fetch_devices(), |devices| {
+                            cosmic::Action::App(Message::DevicesLoaded(devices))
+                        });
+                    }
+                    _ => {
+                        // Other events not handled yet
+                        tracing::debug!("Unhandled daemon event: {:?}", event);
+                    }
+                }
+                Task::none()
+            }
+            Message::TransferStarted(transfer) => {
+                tracing::info!("Transfer started: {} - {}", transfer.id, transfer.filename);
+                self.transfers.insert(transfer.id.clone(), transfer);
+                Task::none()
+            }
+            Message::TransferProgress {
+                transfer_id,
+                bytes_transferred,
+                total_bytes,
+            } => {
+                if let Some(transfer) = self.transfers.get_mut(&transfer_id) {
+                    transfer.bytes_transferred = bytes_transferred;
+                    transfer.total_bytes = total_bytes;
+                }
+                Task::none()
+            }
+            Message::TransferComplete {
+                transfer_id,
+                success,
+                error_message,
+            } => {
+                if let Some(transfer) = self.transfers.get_mut(&transfer_id) {
+                    transfer.status = if success {
+                        TransferStatus::Completed
+                    } else {
+                        TransferStatus::Failed
+                    };
+                    if !error_message.is_empty() {
+                        transfer.error_message = Some(error_message);
+                    }
+                }
+                Task::none()
+            }
         }
     }
+
+    // TODO: Implement subscription for DBus events to get live transfer progress
+    // For now, transfer progress will be displayed when manually triggered
 
     fn view(&self) -> Element<Self::Message> {
         let nav = nav_bar(&self.nav_model, Message::PageSelected);
@@ -492,17 +645,157 @@ impl KdeConnectApp {
 
     /// View for the Transfers page
     fn transfers_view(&self) -> Element<Message> {
-        widget::container(
+        let header = row![
+            widget::text::title3("File Transfers"),
+            widget::horizontal_space(),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center)
+        .padding(24);
+
+        let transfers_list: Element<Message> = if self.transfers.is_empty() {
             column![
-                widget::text::title3("File Transfers"),
-                widget::text("Transfer progress tracking will be displayed here"),
+                widget::text("No active transfers"),
+                widget::text("File transfers will appear here when you send or receive files")
+                    .size(14),
+            ]
+            .spacing(8)
+            .padding(24)
+            .into()
+        } else {
+            let mut col = widget::column().spacing(12).padding(24);
+
+            // Separate active and completed transfers
+            let mut active_transfers: Vec<_> = self
+                .transfers
+                .values()
+                .filter(|t| t.status == TransferStatus::Active)
+                .collect();
+            let mut completed_transfers: Vec<_> = self
+                .transfers
+                .values()
+                .filter(|t| t.status != TransferStatus::Active)
+                .collect();
+
+            // Sort by ID (which includes timestamp)
+            active_transfers.sort_by(|a, b| b.id.cmp(&a.id));
+            completed_transfers.sort_by(|a, b| b.id.cmp(&a.id));
+
+            // Show active transfers first
+            if !active_transfers.is_empty() {
+                col = col.push(widget::text("Active Transfers").size(16));
+                for transfer in active_transfers {
+                    col = col.push(self.transfer_card(transfer));
+                }
+            }
+
+            // Show completed transfers
+            if !completed_transfers.is_empty() {
+                col = col.push(widget::text("Recent Transfers").size(16));
+                for transfer in completed_transfers {
+                    col = col.push(self.transfer_card(transfer));
+                }
+            }
+
+            col.into()
+        };
+
+        column![header, widget::divider::horizontal::default(), transfers_list]
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
+    /// Card for individual transfer
+    fn transfer_card<'a>(&self, transfer: &'a Transfer) -> Element<'a, Message> {
+        let direction_icon = if transfer.direction == "sending" {
+            "go-up-symbolic"
+        } else {
+            "go-down-symbolic"
+        };
+
+        let progress_percentage = if transfer.total_bytes > 0 {
+            (transfer.bytes_transferred as f64 / transfer.total_bytes as f64 * 100.0) as u32
+        } else {
+            0
+        };
+
+        let status_text = match transfer.status {
+            TransferStatus::Active => format!("{}%", progress_percentage),
+            TransferStatus::Completed => "Completed".to_string(),
+            TransferStatus::Failed => "Failed".to_string(),
+            TransferStatus::Cancelled => "Cancelled".to_string(),
+        };
+
+        let status_color = match transfer.status {
+            TransferStatus::Active => Color::from_rgb(0.4, 0.6, 0.8),
+            TransferStatus::Completed => Color::from_rgb(0.2, 0.8, 0.4),
+            TransferStatus::Failed => Color::from_rgb(0.8, 0.2, 0.2),
+            TransferStatus::Cancelled => Color::from_rgb(0.6, 0.6, 0.6),
+        };
+
+        let mut content_col = column![
+            row![
+                widget::icon::from_name(direction_icon).size(24),
+                column![
+                    widget::text(&transfer.filename).size(14),
+                    widget::text(format!(
+                        "{} {} {}",
+                        if transfer.direction == "sending" {
+                            "Sending to"
+                        } else {
+                            "Receiving from"
+                        },
+                        &transfer.device_name,
+                        format_bytes(transfer.bytes_transferred)
+                    ))
+                    .size(12),
+                ]
+                .spacing(4),
+                widget::horizontal_space(),
+                widget::text(status_text).size(14),
             ]
             .spacing(12)
-            .padding(24)
-        )
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+            .align_y(Alignment::Center),
+        ]
+        .spacing(8);
+
+        // Add progress bar for active transfers
+        if transfer.status == TransferStatus::Active && transfer.total_bytes > 0 {
+            content_col = content_col.push(
+                widget::progress_bar(0.0..=100.0, progress_percentage as f32)
+                    .width(Length::Fill),
+            );
+
+            // Show transfer speed and ETA
+            let speed_text = format!(
+                "{} / {} ({})",
+                format_bytes(transfer.bytes_transferred),
+                format_bytes(transfer.total_bytes),
+                format_bytes(transfer.total_bytes - transfer.bytes_transferred)
+            );
+            content_col = content_col.push(widget::text(speed_text).size(12));
+        }
+
+        // Show error message if failed
+        if let Some(error) = &transfer.error_message {
+            content_col = content_col.push(widget::text(format!("Error: {}", error)).size(12));
+        }
+
+        widget::container(content_col.padding(16))
+            .style(move |_theme| cosmic::iced::widget::container::Style {
+                background: Some(cosmic::iced::Background::Color(Color::from_rgb(
+                    0.1, 0.1, 0.1,
+                ))),
+                border: cosmic::iced::Border {
+                    color: status_color,
+                    width: 2.0,
+                    radius: 8.0.into(),
+                },
+                ..Default::default()
+            })
+            .width(Length::Fill)
+            .into()
     }
 
     /// View for the Settings page
@@ -573,4 +866,21 @@ async fn find_phone(device_id: String) -> anyhow::Result<()> {
     client.find_phone(&device_id).await?;
     tracing::info!("Find phone triggered for device {}", device_id);
     Ok(())
+}
+
+/// Format bytes as human-readable string
+fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
 }

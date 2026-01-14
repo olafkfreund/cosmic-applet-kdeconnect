@@ -69,13 +69,16 @@ Build a complete desktop application (`cosmic-kdeconnect`) for comprehensive dev
 ---
 
 ### Phase 4: File Transfer Management
-**Issue #37-7: Transfer Progress UI**
-- [ ] Subscribe to transfer_progress DBus signals
-- [ ] Display active transfers list
-- [ ] Show progress bars with percentage
-- [ ] Display transfer speed and ETA
-- [ ] Show filename, device, and direction (send/receive)
-- [ ] Real-time progress updates
+**Issue #37-7: Transfer Progress UI** ✅
+- [x] Subscribe to transfer_progress DBus signals
+- [x] Display active transfers list
+- [x] Show progress bars with percentage
+- [x] Display transfer speed and ETA
+- [x] Show filename, device, and direction (send/receive)
+- [x] Real-time progress updates via DBus signals
+- [x] Separate active and completed transfers
+- [x] Color-coded status indicators
+- [x] Human-readable file size formatting
 
 **Issue #37-8: Transfer Controls**
 - [ ] Add cancel transfer button

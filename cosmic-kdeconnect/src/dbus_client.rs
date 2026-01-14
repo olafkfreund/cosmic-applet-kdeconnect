@@ -70,6 +70,23 @@ pub enum DaemonEvent {
         plugin: String,
         data: String,
     },
+    /// Transfer progress update
+    TransferProgress {
+        transfer_id: String,
+        device_id: String,
+        filename: String,
+        bytes_transferred: u64,
+        total_bytes: u64,
+        direction: String,
+    },
+    /// Transfer completed
+    TransferComplete {
+        transfer_id: String,
+        device_id: String,
+        filename: String,
+        success: bool,
+        error_message: String,
+    },
     /// Daemon disconnected
     DaemonDisconnected,
     /// Daemon reconnected
@@ -155,6 +172,27 @@ trait KdeConnect {
     /// Signal: Plugin event
     #[zbus(signal)]
     fn plugin_event(device_id: &str, plugin: &str, data: &str) -> zbus::Result<()>;
+
+    /// Signal: Transfer progress update
+    #[zbus(signal)]
+    fn transfer_progress(
+        transfer_id: &str,
+        device_id: &str,
+        filename: &str,
+        bytes_transferred: u64,
+        total_bytes: u64,
+        direction: &str,
+    ) -> zbus::Result<()>;
+
+    /// Signal: Transfer completed
+    #[zbus(signal)]
+    fn transfer_complete(
+        transfer_id: &str,
+        device_id: &str,
+        filename: &str,
+        success: bool,
+        error_message: &str,
+    ) -> zbus::Result<()>;
 }
 
 /// DBus client for communicating with the daemon
@@ -274,6 +312,39 @@ impl DbusClient {
                         device_id,
                         plugin,
                         data,
+                    });
+                }
+            }
+        });
+
+        let event_tx = self.event_tx.clone();
+        let mut transfer_progress_stream = self.proxy.receive_transfer_progress().await?;
+        tokio::spawn(async move {
+            while let Some(signal) = transfer_progress_stream.next().await {
+                if let Ok(args) = signal.args() {
+                    let _ = event_tx.send(DaemonEvent::TransferProgress {
+                        transfer_id: args.transfer_id().to_string(),
+                        device_id: args.device_id().to_string(),
+                        filename: args.filename().to_string(),
+                        bytes_transferred: *args.bytes_transferred(),
+                        total_bytes: *args.total_bytes(),
+                        direction: args.direction().to_string(),
+                    });
+                }
+            }
+        });
+
+        let event_tx = self.event_tx.clone();
+        let mut transfer_complete_stream = self.proxy.receive_transfer_complete().await?;
+        tokio::spawn(async move {
+            while let Some(signal) = transfer_complete_stream.next().await {
+                if let Ok(args) = signal.args() {
+                    let _ = event_tx.send(DaemonEvent::TransferComplete {
+                        transfer_id: args.transfer_id().to_string(),
+                        device_id: args.device_id().to_string(),
+                        filename: args.filename().to_string(),
+                        success: *args.success(),
+                        error_message: args.error_message().to_string(),
                     });
                 }
             }
