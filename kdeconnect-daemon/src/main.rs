@@ -2,10 +2,13 @@ mod config;
 mod cosmic_notifications;
 mod dbus;
 mod device_config;
+mod diagnostics;
 mod mpris_manager;
 
 use anyhow::{Context, Result};
+use clap::Parser;
 use dbus::DbusServer;
+use diagnostics::{BuildInfo, Cli, DiagnosticCommand, Metrics};
 use kdeconnect_protocol::{
     connection::{ConnectionConfig, ConnectionEvent, ConnectionManager},
     discovery::{DiscoveryConfig, DiscoveryEvent, DiscoveryService},
@@ -1411,15 +1414,192 @@ impl Daemon {
     }
 }
 
+/// Handle diagnostic commands
+async fn handle_diagnostic_command(command: &DiagnosticCommand) -> Result<()> {
+    match command {
+        DiagnosticCommand::Version { verbose } => {
+            let build_info = BuildInfo::get();
+            build_info.display(*verbose);
+            Ok(())
+        }
+        DiagnosticCommand::ListDevices { verbose } => {
+            // Load configuration to get device registry path
+            let config = Config::load().context("Failed to load configuration")?;
+            let device_manager =
+                DeviceManager::new(config.device_registry_path()).context("Failed to load device registry")?;
+
+            println!("\n=== Known Devices ===");
+            let device_count = device_manager.device_count();
+
+            if device_count == 0 {
+                println!("No devices found.");
+            } else {
+                for device in device_manager.devices() {
+                    print!("{} ({})", device.name(), device.id());
+
+                    if device.is_connected() {
+                        print!(" - CONNECTED");
+                    } else if device.is_paired() {
+                        print!(" - PAIRED");
+                    } else {
+                        print!(" - AVAILABLE");
+                    }
+
+                    println!();
+
+                    if *verbose {
+                        println!("  Type: {:?}", device.info.device_type);
+                        println!("  Last seen: {} seconds ago", device.seconds_since_last_seen());
+                        if let Some(host) = &device.host {
+                            println!("  Host: {}:{}", host, device.port.unwrap_or(0));
+                        }
+                        println!();
+                    }
+                }
+                println!("\nTotal: {} devices", device_count);
+            }
+            Ok(())
+        }
+        DiagnosticCommand::DeviceInfo { device_id } => {
+            let config = Config::load().context("Failed to load configuration")?;
+            let device_manager =
+                DeviceManager::new(config.device_registry_path()).context("Failed to load device registry")?;
+
+            match device_manager.get_device(device_id) {
+                Some(device) => {
+                    println!("\n=== Device Information ===");
+                    println!("Name: {}", device.name());
+                    println!("ID: {}", device.id());
+                    println!("Type: {:?}", device.info.device_type);
+                    println!("Connection: {:?}", device.connection_state);
+                    println!("Pairing: {:?}", device.pairing_status);
+                    println!("Trusted: {}", device.is_trusted);
+                    println!("Last seen: {} seconds ago", device.seconds_since_last_seen());
+
+                    if let Some(host) = &device.host {
+                        println!("Host: {}:{}", host, device.port.unwrap_or(0));
+                    }
+
+                    if let Some(fingerprint) = &device.certificate_fingerprint {
+                        println!("Certificate fingerprint: {}", fingerprint);
+                    }
+
+                    println!("\nCapabilities:");
+                    println!("  Incoming ({}):", device.info.incoming_capabilities.len());
+                    for cap in &device.info.incoming_capabilities {
+                        println!("    - {}", cap);
+                    }
+                    println!("  Outgoing ({}):", device.info.outgoing_capabilities.len());
+                    for cap in &device.info.outgoing_capabilities {
+                        println!("    - {}", cap);
+                    }
+
+                    Ok(())
+                }
+                None => {
+                    eprintln!("Device not found: {}", device_id);
+                    std::process::exit(1);
+                }
+            }
+        }
+        DiagnosticCommand::TestConnectivity { device_id, timeout } => {
+            println!("Testing connectivity to device: {}", device_id);
+            println!("Timeout: {} seconds", timeout);
+            println!("\nNote: Full connectivity testing requires running daemon.");
+            println!("This command currently only checks device registry.");
+
+            let config = Config::load().context("Failed to load configuration")?;
+            let device_manager =
+                DeviceManager::new(config.device_registry_path()).context("Failed to load device registry")?;
+
+            match device_manager.get_device(device_id) {
+                Some(device) => {
+                    if device.is_connected() {
+                        println!("✓ Device is currently connected");
+                    } else if device.seen_recently(60) {
+                        println!("⚠ Device was seen recently but not connected");
+                    } else {
+                        println!("✗ Device not seen recently (last seen {} seconds ago)", device.seconds_since_last_seen());
+                    }
+                    Ok(())
+                }
+                None => {
+                    eprintln!("✗ Device not found: {}", device_id);
+                    std::process::exit(1);
+                }
+            }
+        }
+        DiagnosticCommand::DumpConfig { show_sensitive } => {
+            let config = Config::load().context("Failed to load configuration")?;
+
+            println!("\n=== Daemon Configuration ===");
+            println!("\n[Device]");
+            println!("Name: {}", config.device.name);
+            println!("Type: {}", config.device.device_type);
+            if let Some(id) = &config.device.device_id {
+                println!("ID: {}", id);
+            }
+
+            println!("\n[Network]");
+            println!("Discovery port: {}", config.network.discovery_port);
+            println!("Transfer port range: {}-{}", config.network.transfer_port_start, config.network.transfer_port_end);
+            println!("Discovery interval: {} seconds", config.network.discovery_interval);
+            println!("Device timeout: {} seconds", config.network.device_timeout);
+
+            println!("\n[Plugins]");
+            println!("Ping: {}", config.plugins.enable_ping);
+            println!("Battery: {}", config.plugins.enable_battery);
+            println!("Notification: {}", config.plugins.enable_notification);
+            println!("Share: {}", config.plugins.enable_share);
+            println!("Clipboard: {}", config.plugins.enable_clipboard);
+            println!("MPRIS: {}", config.plugins.enable_mpris);
+            println!("RunCommand: {}", config.plugins.enable_runcommand);
+            println!("Remote Input: {}", config.plugins.enable_remoteinput);
+            println!("Find My Phone: {}", config.plugins.enable_findmyphone);
+            println!("Telephony: {}", config.plugins.enable_telephony);
+            println!("Presenter: {}", config.plugins.enable_presenter);
+            println!("Contacts: {}", config.plugins.enable_contacts);
+
+            if *show_sensitive {
+                println!("\n[Paths]");
+                println!("Config: {:?}", config.paths.config_dir);
+                println!("Data: {:?}", config.paths.data_dir);
+                println!("Certificates: {:?}", config.paths.cert_dir);
+                println!("Certificate file: {:?}", config.certificate_path());
+                println!("Private key file: {:?}", config.private_key_path());
+            }
+
+            Ok(())
+        }
+        DiagnosticCommand::ExportLogs { output, lines } => {
+            println!("Exporting last {} lines of logs to: {}", lines, output);
+            println!("\nNote: Log export currently requires manual journal extraction.");
+            println!("Run: journalctl -u kdeconnect-daemon -n {} > {}", lines, output);
+            Ok(())
+        }
+        DiagnosticCommand::Metrics { interval, count } => {
+            println!("Performance metrics display");
+            println!("Update interval: {} seconds", interval);
+            println!("Updates: {}", if *count == 0 { "infinite".to_string() } else { count.to_string() });
+            println!("\nNote: Metrics require running daemon with --metrics flag.");
+            println!("Start daemon with: kdeconnect-daemon --metrics");
+            Ok(())
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize logging
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .init();
+    // Parse command-line arguments
+    let cli = Cli::parse();
+
+    // Handle diagnostic commands (non-daemon mode)
+    if let Some(command) = &cli.command {
+        return handle_diagnostic_command(command).await;
+    }
+
+    // Initialize logging with CLI configuration
+    diagnostics::init_logging(&cli).context("Failed to initialize logging")?;
 
     info!("Starting KDE Connect daemon...");
 
