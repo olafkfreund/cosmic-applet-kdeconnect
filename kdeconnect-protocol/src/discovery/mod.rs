@@ -209,17 +209,20 @@ impl DeviceInfo {
     }
 
     /// Convert DeviceInfo to an identity packet
+    ///
+    /// Field order matches official KDE Connect implementation:
+    /// deviceId, deviceName, protocolVersion, deviceType, tcpPort, capabilities
     pub fn to_identity_packet(&self) -> Packet {
         Packet::new(
             "kdeconnect.identity",
             json!({
                 "deviceId": self.device_id,
                 "deviceName": self.device_name,
-                "deviceType": self.device_type.as_str(),
                 "protocolVersion": self.protocol_version,
+                "deviceType": self.device_type.as_str(),
+                "tcpPort": self.tcp_port,
                 "incomingCapabilities": self.incoming_capabilities,
                 "outgoingCapabilities": self.outgoing_capabilities,
-                "tcpPort": self.tcp_port,
             }),
         )
     }
