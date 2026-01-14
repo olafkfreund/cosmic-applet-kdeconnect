@@ -14,7 +14,7 @@ This project consists of:
 
 ## Features
 
-### Current Status: 🚧 In Development (~95% Complete)
+### Current Status: 🚧 In Development (~96% Complete)
 
 #### Completed ✅
 - [x] Core Protocol Library (v7/8)
@@ -56,19 +56,19 @@ This project consists of:
   - [x] Pair/unpair device operations
   - [x] Automatic device list refresh
   - [x] Device type icons (phone, tablet, desktop, laptop, TV)
+  - [x] File picker integration (XDG Desktop Portal)
 - [x] Comprehensive Test Suite (114 tests, 12 integration tests)
 - [x] CI/CD Pipeline with GitHub Actions
 - [x] Pre-commit hooks for code quality
 - [x] Error handling and diagnostics infrastructure
 
 #### In Progress 🔨
-- [ ] **File Transfer UI** (file picker integration)
 - [ ] **Advanced Plugin Features** (MPRIS DBus integration, etc.)
+- [ ] **Transfer progress tracking** (progress bars, cancellation)
 
 #### Planned 📋
 - [ ] Real device testing (requires Android/iOS device)
-- [ ] File Transfer UI (file picker integration)
-- [ ] Transfer progress tracking and cancellation
+- [ ] Advanced file transfer features (multiple files, drag & drop)
 - [ ] MPRIS DBus integration (player discovery and control)
 - [ ] Remote Input
 - [ ] SMS Messaging
