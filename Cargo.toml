@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "cosmic-connect-core",
+    "cosmic-connect-protocol",
     "cosmic-applet-connect",
     "cosmic-connect",
     "cosmic-connect-daemon",
@@ -22,8 +22,11 @@ rust-version = "1.70"
 # GUI and Desktop Integration
 libcosmic = { git = "https://github.com/pop-os/libcosmic", default-features = false }
 
-# Shared Cosmic Connect Core (protocol implementation)
-cosmic-connect-core = { path = "./cosmic-connect-core" }
+# Shared Cosmic Connect Core (TLS and crypto layer)
+cosmic-connect-core = { path = "../cosmic-connect-core" }
+
+# Protocol implementation
+cosmic-connect-protocol = { path = "./cosmic-connect-protocol" }
 
 # Async Runtime
 tokio = { version = "1.40", features = ["full"] }

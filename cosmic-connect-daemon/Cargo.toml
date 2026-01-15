@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Cosmic Connect background daemon"
 
 [dependencies]
-cosmic-connect-core = { workspace = true }
+cosmic-connect-protocol = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -9,7 +9,7 @@ description = "COSMIC Connect applet for COSMIC Desktop"
 
 [dependencies]
 libcosmic = { workspace = true, features = ["applet"] }
-cosmic-connect-core = { workspace = true }
+cosmic-connect-protocol = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

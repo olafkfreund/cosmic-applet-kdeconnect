@@ -1,5 +1,5 @@
 [package]
-name = "cosmic-connect-core"
+name = "cosmic-connect-protocol"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,6 +8,8 @@ repository.workspace = true
 description = "Cosmic Connect protocol implementation in Rust"
 
 [dependencies]
+# Shared cosmic-connect-core (provides TLS, certificates, protocol)
+cosmic-connect-core = { workspace = true }
 
 tokio = { workspace = true }
 async-trait = { workspace = true }
