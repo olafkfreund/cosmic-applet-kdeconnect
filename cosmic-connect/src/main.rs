@@ -132,6 +132,7 @@ enum Message {
         success: bool,
         error_message: String,
     },
+    CancelTransfer(String), // transfer_id
     // Settings messages
     SettingsLoaded(Result<settings::DaemonConfig, String>),
     RefreshSettings,
@@ -406,6 +407,28 @@ impl Application for CConnectApp {
                 tracing::info!("Quick system monitor request for device: {}", device_id);
                 // TODO: Implement system monitor plugin when Desktop-to-Desktop plugins are ready (Issue #66)
                 tracing::warn!("System monitor plugin not yet implemented");
+                Task::none()
+            }
+            Message::CancelTransfer(transfer_id) => {
+                tracing::info!("Cancelling transfer: {}", transfer_id);
+
+                // Update local state immediately for UI responsiveness
+                if let Some(transfer) = self.transfers.get_mut(&transfer_id) {
+                    transfer.status = TransferStatus::Cancelled;
+                    transfer.error_message = Some("Cancelled by user".to_string());
+                }
+
+                // TODO: Implement cancel_transfer DBus method in daemon
+                // The daemon currently doesn't support transfer cancellation as transfers
+                // are spawned as independent tasks without cancellation tokens.
+                // Full implementation requires:
+                // 1. Add TransferManager to daemon with CancellationToken tracking
+                // 2. Check cancellation in progress callback (return false to stop)
+                // 3. Add cancel_transfer DBus method
+                // 4. Add to dbus_client.rs proxy
+                // See Issue #71 Phase 2 for details
+
+                tracing::warn!("Transfer cancellation UI implemented, but daemon support pending");
                 Task::none()
             }
             Message::MprisPlayersUpdated(players) => {
@@ -1168,6 +1191,16 @@ impl CConnectApp {
         };
 
         let spacing = theme.cosmic().spacing;
+
+        // Cancel button for active transfers
+        let cancel_button: Element<Message> = if transfer.status == TransferStatus::Active {
+            widget::button::text("Cancel")
+                .on_press(Message::CancelTransfer(transfer.id.clone()))
+                .into()
+        } else {
+            widget::horizontal_space().into()
+        };
+
         let mut content_col = column![
             row![
                 widget::icon::from_name(direction_icon).size(24),
@@ -1187,6 +1220,7 @@ impl CConnectApp {
                 .spacing(spacing.space_xxs),
                 widget::horizontal_space(),
                 widget::text::body(status_text),
+                cancel_button,
             ]
             .spacing(spacing.space_xs)
             .align_y(Alignment::Center),
