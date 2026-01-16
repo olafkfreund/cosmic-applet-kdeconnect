@@ -3,9 +3,11 @@
 //! Configuration management for the KDE Connect daemon.
 
 use anyhow::{Context, Result};
+use cosmic_connect_protocol::TransportPreference;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 /// Daemon configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,6 +17,10 @@ pub struct Config {
 
     /// Network configuration
     pub network: NetworkConfig,
+
+    /// Transport configuration
+    #[serde(default)]
+    pub transport: TransportConfig,
 
     /// Plugin configuration
     pub plugins: PluginConfig,
@@ -59,6 +65,80 @@ pub struct NetworkConfig {
     /// Device timeout in seconds (how long before a device is considered offline)
     #[serde(default = "default_device_timeout")]
     pub device_timeout: u64,
+}
+
+/// Transport configuration
+///
+/// Configure which network transports are available and how they should be used.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransportConfig {
+    /// Enable TCP/IP transport (WiFi, Ethernet)
+    #[serde(default = "default_true")]
+    pub enable_tcp: bool,
+
+    /// Enable Bluetooth transport
+    #[serde(default = "default_false")]
+    pub enable_bluetooth: bool,
+
+    /// Transport preference for new connections
+    #[serde(default)]
+    pub preference: TransportPreferenceConfig,
+
+    /// TCP operation timeout in seconds
+    #[serde(default = "default_tcp_timeout")]
+    pub tcp_timeout_secs: u64,
+
+    /// Bluetooth operation timeout in seconds
+    #[serde(default = "default_bluetooth_timeout")]
+    pub bluetooth_timeout_secs: u64,
+
+    /// Automatically fallback to alternative transport if primary fails
+    #[serde(default = "default_true")]
+    pub auto_fallback: bool,
+
+    /// Bluetooth device filtering (empty = no filter, accepts all)
+    #[serde(default)]
+    pub bluetooth_device_filter: Vec<String>,
+}
+
+/// Transport preference configuration (serialization wrapper)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransportPreferenceConfig {
+    /// Prefer TCP if available
+    PreferTcp,
+    /// Prefer Bluetooth if available
+    PreferBluetooth,
+    /// Try TCP first, fall back to Bluetooth
+    TcpFirst,
+    /// Try Bluetooth first, fall back to TCP
+    BluetoothFirst,
+    /// Only use TCP
+    OnlyTcp,
+    /// Only use Bluetooth
+    OnlyBluetooth,
+}
+
+impl Default for TransportPreferenceConfig {
+    fn default() -> Self {
+        Self::PreferTcp
+    }
+}
+
+impl From<TransportPreferenceConfig> for TransportPreference {
+    fn from(config: TransportPreferenceConfig) -> Self {
+        use cosmic_connect_protocol::TransportType;
+        match config {
+            TransportPreferenceConfig::PreferTcp => TransportPreference::PreferTcp,
+            TransportPreferenceConfig::PreferBluetooth => TransportPreference::PreferBluetooth,
+            TransportPreferenceConfig::TcpFirst => TransportPreference::TcpFirst,
+            TransportPreferenceConfig::BluetoothFirst => TransportPreference::BluetoothFirst,
+            TransportPreferenceConfig::OnlyTcp => TransportPreference::Only(TransportType::Tcp),
+            TransportPreferenceConfig::OnlyBluetooth => {
+                TransportPreference::Only(TransportType::Bluetooth)
+            }
+        }
+    }
 }
 
 /// Plugin configuration
@@ -146,8 +226,20 @@ fn default_device_timeout() -> u64 {
     30
 }
 
+fn default_tcp_timeout() -> u64 {
+    10
+}
+
+fn default_bluetooth_timeout() -> u64 {
+    15
+}
+
 fn default_true() -> bool {
     true
+}
+
+fn default_false() -> bool {
+    false
 }
 
 impl Default for NetworkConfig {
@@ -159,6 +251,52 @@ impl Default for NetworkConfig {
             discovery_interval: default_discovery_interval(),
             device_timeout: default_device_timeout(),
         }
+    }
+}
+
+impl Default for TransportConfig {
+    fn default() -> Self {
+        Self {
+            // TCP enabled by default (existing behavior)
+            enable_tcp: true,
+            // Bluetooth disabled by default (opt-in)
+            enable_bluetooth: false,
+            // Prefer TCP by default (faster, more reliable on local network)
+            preference: TransportPreferenceConfig::PreferTcp,
+            // TCP timeout: 10 seconds
+            tcp_timeout_secs: default_tcp_timeout(),
+            // Bluetooth timeout: 15 seconds (BLE has higher latency)
+            bluetooth_timeout_secs: default_bluetooth_timeout(),
+            // Auto fallback enabled by default
+            auto_fallback: true,
+            // No device filter by default (accept all)
+            bluetooth_device_filter: Vec::new(),
+        }
+    }
+}
+
+impl TransportConfig {
+    /// Get TCP timeout as Duration
+    pub fn tcp_timeout(&self) -> Duration {
+        Duration::from_secs(self.tcp_timeout_secs)
+    }
+
+    /// Get Bluetooth timeout as Duration
+    pub fn bluetooth_timeout(&self) -> Duration {
+        Duration::from_secs(self.bluetooth_timeout_secs)
+    }
+
+    /// Check if a Bluetooth device address should be accepted
+    pub fn should_accept_bluetooth_device(&self, address: &str) -> bool {
+        // If no filter, accept all devices
+        if self.bluetooth_device_filter.is_empty() {
+            return true;
+        }
+
+        // Check if address matches any pattern in filter
+        self.bluetooth_device_filter
+            .iter()
+            .any(|pattern| address.contains(pattern))
     }
 }
 
@@ -212,6 +350,7 @@ impl Default for Config {
                 device_id: None,
             },
             network: NetworkConfig::default(),
+            transport: TransportConfig::default(),
             plugins: PluginConfig::default(),
             paths: PathConfig {
                 config_dir,
@@ -303,5 +442,45 @@ mod tests {
         let toml_str = toml::to_string(&config).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.network.discovery_port, config.network.discovery_port);
+    }
+
+    #[test]
+    fn test_transport_config_defaults() {
+        let transport = TransportConfig::default();
+        assert!(transport.enable_tcp);
+        assert!(!transport.enable_bluetooth);
+        assert!(transport.auto_fallback);
+        assert_eq!(transport.tcp_timeout_secs, 10);
+        assert_eq!(transport.bluetooth_timeout_secs, 15);
+    }
+
+    #[test]
+    fn test_transport_timeout_conversion() {
+        let transport = TransportConfig::default();
+        assert_eq!(transport.tcp_timeout(), Duration::from_secs(10));
+        assert_eq!(transport.bluetooth_timeout(), Duration::from_secs(15));
+    }
+
+    #[test]
+    fn test_bluetooth_device_filter() {
+        let mut transport = TransportConfig::default();
+
+        // No filter = accept all
+        assert!(transport.should_accept_bluetooth_device("00:11:22:33:44:55"));
+        assert!(transport.should_accept_bluetooth_device("AA:BB:CC:DD:EE:FF"));
+
+        // With filter
+        transport.bluetooth_device_filter = vec!["00:11:22".to_string()];
+        assert!(transport.should_accept_bluetooth_device("00:11:22:33:44:55"));
+        assert!(!transport.should_accept_bluetooth_device("AA:BB:CC:DD:EE:FF"));
+    }
+
+    #[test]
+    fn test_transport_preference_conversion() {
+        let pref: TransportPreference = TransportPreferenceConfig::PreferTcp.into();
+        assert_eq!(pref, TransportPreference::PreferTcp);
+
+        let pref: TransportPreference = TransportPreferenceConfig::BluetoothFirst.into();
+        assert_eq!(pref, TransportPreference::BluetoothFirst);
     }
 }
