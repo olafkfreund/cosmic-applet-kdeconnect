@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="connect_logo.png" alt="COSMIC Connect Logo" width="200"/>
+</p>
+
 # COSMIC Connect
 
 A modern, cross-platform device connectivity solution for COSMIC Desktop, written in Rust with 70%+ code sharing between desktop and mobile platforms.
@@ -14,10 +18,12 @@ This project is part of a **multi-platform ecosystem**:
 ### Key Innovations
 
 - **70%+ Code Sharing** - Unified Rust core shared between desktop and Android
-- **100% Protocol Compatibility** - Full KDE Connect protocol v7/8 implementation
+- **Protocol Independence** - CConnect protocol (v7/8 compatible) with unique port 1816
+- **Side-by-Side Operation** - Can run alongside KDE Connect without conflicts
 - **No OpenSSL** - Modern rustls-based TLS (better cross-compilation)
 - **FFI Bindings** - Kotlin/Swift support via uniffi-rs
 - **Modern Async** - Tokio-based concurrent architecture
+- **COSMIC Design Compliance** - Hierarchical text, theme integration, WCAG AA+ accessibility
 
 ## Architecture
 
@@ -66,7 +72,13 @@ cosmic-connect-desktop-app/
 
 ## Features
 
-### Status: Production Ready (98% Complete)
+### Status: Production Ready
+
+**Version:** 0.1.0
+**Protocol:** CConnect v7/8 (KDE Connect compatible)
+**Discovery Port:** 1816 (conflicts avoided with KDE Connect's 1716)
+**Packet Namespace:** cconnect.* (independent from kdeconnect.*)
+**UI Compliance:** COSMIC Design System (hierarchical text, theme system, WCAG AA+)
 
 #### Core Features
 
@@ -98,7 +110,8 @@ cosmic-connect-desktop-app/
 - URL sharing (auto-opens in browser)
 - Text sharing (auto-copies to clipboard)
 - 64KB streaming buffer for efficiency
-- Port range: 1739-1764 (KDE Connect standard)
+- Discovery port: 1816 (fallback range: 1814-1864)
+- Transfer port range: 1739-1764 (protocol standard)
 - COSMIC Desktop notifications for transfers
 
 #### Desktop Integration
@@ -119,16 +132,26 @@ cosmic-connect-desktop-app/
 - **Error Diagnostics** - Comprehensive error handling
 - **NixOS Support** - Full flake.nix with dev shell
 
+### Recently Completed
+
+- COSMIC Design System compliance (hierarchical text, theme integration, accessibility)
+- Port independence (1816) for side-by-side operation with KDE Connect
+- Protocol namespace (cconnect.*) establishing project identity
+- Settings UI foundation with DaemonConfig data structures
+
 ### In Progress
 
+- Comprehensive settings system with plugin management (Issue #70)
+- Enhanced UI/UX with quick actions and notifications (Issue #71)
 - Transfer progress tracking (progress bars, cancellation)
-- iOS support using same cosmic-connect-core
+- Android app synchronization to match port/protocol changes
 
 ### Planned
 
+- iOS support using same cosmic-connect-core
+- Bluetooth transport layer
 - Advanced file transfer features (multiple files, drag & drop)
 - SMS messaging support
-- Bluetooth transport layer
 
 ## Technology Stack
 
