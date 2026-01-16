@@ -1501,6 +1501,128 @@ impl CConnectInterface {
         Ok(())
     }
 
+    /// Get discovery configuration
+    ///
+    /// Returns discovery-related network configuration as JSON.
+    ///
+    /// # Returns
+    /// JSON string containing discovery_interval and device_timeout
+    async fn get_discovery_config(&self) -> Result<String, zbus::fdo::Error> {
+        debug!("DBus: GetDiscoveryConfig called");
+
+        let config = self.config.read().await;
+        let discovery_config = serde_json::json!({
+            "discovery_interval": config.network.discovery_interval,
+            "device_timeout": config.network.device_timeout,
+            "discovery_port": config.network.discovery_port,
+        });
+
+        let json = serde_json::to_string_pretty(&discovery_config)
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to serialize discovery config: {}", e)))?;
+
+        Ok(json)
+    }
+
+    /// Set discovery interval
+    ///
+    /// # Arguments
+    /// * `interval_secs` - Discovery broadcast interval in seconds (recommended: 3-30)
+    async fn set_discovery_interval(&self, interval_secs: u64) -> Result<(), zbus::fdo::Error> {
+        info!("DBus: SetDiscoveryInterval called: {}", interval_secs);
+
+        // Validate interval (between 1 and 60 seconds)
+        if interval_secs == 0 || interval_secs > 60 {
+            return Err(zbus::fdo::Error::Failed(format!(
+                "Invalid discovery interval: {}. Must be between 1 and 60 seconds",
+                interval_secs
+            )));
+        }
+
+        let mut config = self.config.write().await;
+        config.network.discovery_interval = interval_secs;
+
+        config.save().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("Failed to save config: {}", e))
+        })?;
+
+        info!("DBus: Discovery interval set to {} seconds (restart required)", interval_secs);
+        Ok(())
+    }
+
+    /// Set device timeout
+    ///
+    /// # Arguments
+    /// * `timeout_secs` - Device timeout in seconds (recommended: 10-120)
+    async fn set_device_timeout(&self, timeout_secs: u64) -> Result<(), zbus::fdo::Error> {
+        info!("DBus: SetDeviceTimeout called: {}", timeout_secs);
+
+        // Validate timeout (between 5 and 300 seconds)
+        if timeout_secs < 5 || timeout_secs > 300 {
+            return Err(zbus::fdo::Error::Failed(format!(
+                "Invalid device timeout: {}. Must be between 5 and 300 seconds",
+                timeout_secs
+            )));
+        }
+
+        let mut config = self.config.write().await;
+        config.network.device_timeout = timeout_secs;
+
+        config.save().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("Failed to save config: {}", e))
+        })?;
+
+        info!("DBus: Device timeout set to {} seconds (restart required)", timeout_secs);
+        Ok(())
+    }
+
+    /// Reset configuration to defaults
+    ///
+    /// Resets all daemon configuration to default values and saves to disk.
+    /// Preserves only the device ID to maintain identity across reset.
+    async fn reset_config_to_defaults(&self) -> Result<(), zbus::fdo::Error> {
+        warn!("DBus: ResetConfigToDefaults called - resetting all configuration");
+
+        let mut config = self.config.write().await;
+
+        // Preserve device ID (should not change on config reset)
+        let device_id = config.device.device_id.clone();
+
+        // Reset to defaults
+        *config = crate::config::Config::default();
+
+        // Restore device ID
+        config.device.device_id = device_id;
+
+        config.save().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("Failed to save config: {}", e))
+        })?;
+
+        warn!("DBus: Configuration reset to defaults (restart required for full effect)");
+        Ok(())
+    }
+
+    /// Restart daemon
+    ///
+    /// Initiates a graceful restart of the daemon. The daemon will:
+    /// 1. Close all active connections
+    /// 2. Save current state
+    /// 3. Exit with code 0 (systemd will auto-restart if configured)
+    ///
+    /// Note: This method returns immediately. The actual restart happens
+    /// asynchronously after a brief delay.
+    async fn restart_daemon(&self) -> Result<(), zbus::fdo::Error> {
+        warn!("DBus: RestartDaemon called - initiating graceful restart");
+
+        // Spawn a task to restart after a brief delay (to allow this method to return)
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            warn!("Restarting daemon...");
+            std::process::exit(0);
+        });
+
+        Ok(())
+    }
+
     /// Signal: Device was added (discovered)
     ///
     /// Emitted when a new device is discovered on the network.

@@ -186,6 +186,21 @@ trait CConnect {
     /// Set auto fallback enabled
     async fn set_auto_fallback(&self, enabled: bool) -> zbus::Result<()>;
 
+    /// Get discovery configuration as JSON
+    async fn get_discovery_config(&self) -> zbus::Result<String>;
+
+    /// Set discovery interval in seconds
+    async fn set_discovery_interval(&self, interval_secs: u64) -> zbus::Result<()>;
+
+    /// Set device timeout in seconds
+    async fn set_device_timeout(&self, timeout_secs: u64) -> zbus::Result<()>;
+
+    /// Reset all configuration to defaults
+    async fn reset_config_to_defaults(&self) -> zbus::Result<()>;
+
+    /// Restart the daemon
+    async fn restart_daemon(&self) -> zbus::Result<()>;
+
     /// Signal: Device was added
     #[zbus(signal)]
     fn device_added(device_id: &str, device_info: DeviceInfo) -> zbus::Result<()>;
@@ -671,6 +686,51 @@ impl DbusClient {
             .context("Failed to set auto fallback")
     }
 
+    /// Get discovery configuration
+    pub async fn get_discovery_config(&self) -> Result<String> {
+        debug!("Getting discovery configuration");
+        self.proxy
+            .get_discovery_config()
+            .await
+            .context("Failed to get discovery config")
+    }
+
+    /// Set discovery interval
+    pub async fn set_discovery_interval(&self, interval_secs: u64) -> Result<()> {
+        info!("Setting discovery interval to {} seconds", interval_secs);
+        self.proxy
+            .set_discovery_interval(interval_secs)
+            .await
+            .context("Failed to set discovery interval")
+    }
+
+    /// Set device timeout
+    pub async fn set_device_timeout(&self, timeout_secs: u64) -> Result<()> {
+        info!("Setting device timeout to {} seconds", timeout_secs);
+        self.proxy
+            .set_device_timeout(timeout_secs)
+            .await
+            .context("Failed to set device timeout")
+    }
+
+    /// Reset configuration to defaults
+    pub async fn reset_config_to_defaults(&self) -> Result<()> {
+        warn!("Resetting configuration to defaults");
+        self.proxy
+            .reset_config_to_defaults()
+            .await
+            .context("Failed to reset config to defaults")
+    }
+
+    /// Restart the daemon
+    pub async fn restart_daemon(&self) -> Result<()> {
+        warn!("Restarting daemon");
+        self.proxy
+            .restart_daemon()
+            .await
+            .context("Failed to restart daemon")
+    }
+
     /// Check if daemon is available
     pub async fn is_daemon_available(&self) -> bool {
         // Try to list devices as a health check
@@ -833,6 +893,51 @@ impl ReconnectingClient {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Not connected to daemon"))?
             .set_auto_fallback(enabled)
+            .await
+    }
+
+    /// Get discovery configuration
+    pub async fn get_discovery_config(&self) -> Result<String> {
+        self.client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Not connected to daemon"))?
+            .get_discovery_config()
+            .await
+    }
+
+    /// Set discovery interval
+    pub async fn set_discovery_interval(&self, interval_secs: u64) -> Result<()> {
+        self.client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Not connected to daemon"))?
+            .set_discovery_interval(interval_secs)
+            .await
+    }
+
+    /// Set device timeout
+    pub async fn set_device_timeout(&self, timeout_secs: u64) -> Result<()> {
+        self.client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Not connected to daemon"))?
+            .set_device_timeout(timeout_secs)
+            .await
+    }
+
+    /// Reset configuration to defaults
+    pub async fn reset_config_to_defaults(&self) -> Result<()> {
+        self.client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Not connected to daemon"))?
+            .reset_config_to_defaults()
+            .await
+    }
+
+    /// Restart the daemon
+    pub async fn restart_daemon(&self) -> Result<()> {
+        self.client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Not connected to daemon"))?
+            .restart_daemon()
             .await
     }
 }
