@@ -515,10 +515,11 @@ impl KdeConnectInterface {
         info!("DBus: Share packet sent to {}, waiting for connection", device_id);
 
         // Generate unique transfer ID
-        let transfer_id = format!("{}_{}", device_id, std::time::SystemTime::now()
+        let timestamp_millis = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis());
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+            .as_millis();
+        let transfer_id = format!("{}_{}", device_id, timestamp_millis);
 
         // Spawn background task to handle file transfer with progress tracking
         let file_path = path.clone();
@@ -702,7 +703,7 @@ impl KdeConnectInterface {
         // Generate a unique notification ID based on timestamp
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_else(|_| std::time::Duration::from_secs(0))
             .as_millis()
             .to_string();
 

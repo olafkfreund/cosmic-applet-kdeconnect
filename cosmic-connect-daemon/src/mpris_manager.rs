@@ -158,8 +158,8 @@ impl MprisManager {
 
         let mut players = Vec::new();
         for name in names {
-            if name.starts_with(MPRIS_BUS_PREFIX) {
-                let player_name = name.strip_prefix(MPRIS_BUS_PREFIX).unwrap().to_string();
+            if let Some(player_name) = name.strip_prefix(MPRIS_BUS_PREFIX) {
+                let player_name = player_name.to_string();
                 debug!("Discovered MPRIS player: {}", player_name);
                 players.push(player_name);
             }
