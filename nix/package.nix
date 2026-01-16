@@ -40,21 +40,9 @@ rustPlatform.buildRustPackage rec {
 
   cargoLock = {
     lockFile = ../Cargo.lock;
-    outputHashes = {
-      "accesskit-0.16.0" = "sha256-uoLcd116WXQTu1ZTfJDEl9+3UPpGBN/QuJpkkGyRADQ=";
-      "atomicwrites-0.4.2" = "sha256-QZSuGPrJXh+svMeFWqAXoqZQxLq/WfIiamqvjJNVhxA=";
-      "clipboard_x11-0.4.2" = "sha256-+8CGmBf1Gl9gnBDtuKtkzUE5rySebhH7Bsq/kNlJofY=";
-      "cosmic-client-toolkit-0.1.0" = "sha256-KvXQJ/EIRyrlmi80WKl2T9Bn+j7GCfQlcjgcEVUxPkc=";
-      "cosmic-freedesktop-icons-0.4.0" = "sha256-D4bWHQ4Dp8UGiZjc6geh2c2SGYhB7mX13THpCUie1c4=";
-      "cosmic-panel-config-0.1.0" = "sha256-1Xwe1uONJbl4wq6QBbTI1suLiSlTzU4e/5WBccvghHE=";
-      "libcosmic-0.1.0" = "sha256-DOsc4tcfCvNpNZLMsLvFJoy4HOz8NixuepXs/2XeD3E=";
-      "cosmic-settings-daemon-0.1.0" = "sha256-1yVIL3SQnOEtTHoLiZgBH21holNxcOuToyQ+QdvqoBg=";
-      "cosmic-text-0.16.0" = "sha256-Dqi2eeMId4oiTLR0rd+cRKAUu7PSAa4t0ELzk4kqvqg=";
-      "dpi-0.1.1" = "sha256-PeHUUvJpntEhmAy8PSkXponc9OZ3YcQgpEe9sV4l8ig=";
-      "iced_glyphon-0.6.0" = "sha256-u1vnsOjP8npQ57NNSikotuHxpi4Mp/rV9038vAgCsfQ=";
-      "smithay-clipboard-0.8.0" = "sha256-4InFXm0ahrqFrtNLeqIuE3yeOpxKZJZx+Bc0yQDtv34=";
-      "softbuffer-0.4.1" = "sha256-/ocK79Lr5ywP/bb5mrcm7eTzeBbwpOazojvFUsAjMKM=";
-    };
+    # Allow Nix to fetch git dependencies automatically without manual hashes
+    # This is needed because libcosmic and other COSMIC deps are complex workspaces
+    allowBuiltinFetchGit = true;
   };
 
   nativeBuildInputs = [
