@@ -2,6 +2,33 @@
 
 Thank you for your interest in contributing to COSMIC Connect! This guide will help you get started.
 
+## ⚠️ MANDATORY: Pre-Commit Checks
+
+### Before Every Commit - Run BOTH Checks
+
+**Step 1: COSMIC Code Review** (REQUIRED)
+```bash
+@cosmic-code-reviewer /pre-commit-check
+```
+
+**Step 2: Code Simplification** (REQUIRED)
+```bash
+@code-simplifier review the changes we made
+```
+
+These checks are **mandatory** before any commit. They catch:
+- Hard-coded values (colors, dimensions, radii)
+- Unsafe error handling (`.unwrap()`, `.expect()`)
+- COSMIC Desktop pattern violations
+- Code quality issues
+- Redundant patterns
+
+**Exception:** Skip only for trivial changes (typo fixes, comments only).
+
+See [CLAUDE.md](CLAUDE.md) for detailed pre-commit workflow.
+
+---
+
 ## Table of Contents
 
 - [Getting Started](#getting-started)

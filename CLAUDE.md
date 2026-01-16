@@ -1,11 +1,26 @@
 # CLAUDE.md - COSMIC Connect Development Guidelines
 
-## Pre-Commit Workflow
+## ⚠️ MANDATORY Pre-Commit Checks
 
-### Code Simplification (REQUIRED)
-Before creating any git commit, **ALWAYS** run the code-simplifier agent on changes:
+### REQUIRED: Two-Step Pre-Commit Process
 
+Before creating **ANY** git commit, you **MUST** run both checks:
+
+#### Step 1: COSMIC Code Review (REQUIRED)
+```bash
+@cosmic-code-reviewer /pre-commit-check
 ```
+
+This verifies:
+- No hard-coded colors, dimensions, or radii
+- No `.unwrap()` or `.expect()` calls
+- Proper error handling and logging
+- Theme integration correctness
+- COSMIC Desktop best practices
+- Architecture patterns
+
+#### Step 2: Code Simplification (REQUIRED)
+```bash
 Run code-simplifier agent on the changes we made
 ```
 
@@ -17,6 +32,11 @@ This ensures:
 - Alignment with codebase conventions
 
 **Exception:** Skip only if changes are trivial (typo fixes, comments only).
+
+### Why Both Checks?
+- **@cosmic-code-reviewer**: Catches COSMIC-specific issues (theming, widgets, patterns)
+- **code-simplifier**: Optimizes Rust code quality and idioms
+- Together they ensure high-quality, maintainable COSMIC Desktop code
 
 ## Development Standards
 
