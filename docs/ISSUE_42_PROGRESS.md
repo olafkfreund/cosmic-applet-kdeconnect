@@ -1,8 +1,8 @@
 # Issue #42: Bluetooth Transport - Progress Report
 
 **Date:** 2025-01-16
-**Status:** 90% Complete
-**Estimated Remaining:** 2-3 hours
+**Status:** 95% Complete
+**Estimated Remaining:** 1-2 hours
 
 ---
 
@@ -181,20 +181,40 @@ bluetooth_device_filter = []
 
 ---
 
-### 8. Bluetooth Discovery Integration (0% Complete)
-**Status:** ⏳ Not Started
-**Estimated Time:** 2-3 hours
+### 8. Bluetooth Discovery Integration (100% Complete)
+**Status:** ✅ Complete
+**Commit:** `d2c84cb`
 
-**What's Needed:**
-- Add BLE scanning to discovery module
-- Emit `DiscoveryEvent` for Bluetooth devices
-- Support dual discovery (UDP + BLE)
-- Handle Bluetooth advertising
-- Filter devices using transport config
+**What Was Built:**
 
-**Files to Update:**
-- `cosmic-connect-protocol/src/discovery/service.rs`
-- Create `cosmic-connect-protocol/src/discovery/bluetooth.rs`
+**DiscoveryEvent Enhancements:**
+- ✅ Added `transport_address` and `transport_type` fields to DeviceDiscovered/Updated
+- ✅ Deprecated old `address` field for backward compatibility
+- ✅ Created helper constructors: tcp_discovered(), bluetooth_discovered(), tcp_updated(), bluetooth_updated()
+- ✅ Added getters: transport_type(), transport_address()
+- ✅ Updated tests to use new helper methods
+
+**BluetoothDiscoveryService:**
+- ✅ BLE scanning for KDE Connect service UUID
+- ✅ Configurable scan interval (10s), timeout (60s), and device filtering
+- ✅ Emits DiscoveryEvents for Bluetooth-discovered devices
+- ✅ Handles device timeout for BLE devices
+- ✅ Comprehensive tests
+
+**UnifiedDiscoveryService:**
+- ✅ Facade coordinating TCP and Bluetooth discovery
+- ✅ Non-breaking: Bluetooth is opt-in (disabled by default)
+- ✅ Forwards events from both discovery methods to unified stream
+- ✅ Follows TransportManager facade pattern
+
+**Files Created:**
+- `cosmic-connect-protocol/src/discovery/bluetooth.rs` (469 lines)
+- `cosmic-connect-protocol/src/discovery/unified.rs` (273 lines)
+
+**Files Updated:**
+- `cosmic-connect-protocol/src/discovery/events.rs` - Extended for multi-transport
+- `cosmic-connect-protocol/src/discovery/service.rs` - Uses new helper methods
+- `cosmic-connect-protocol/src/discovery/mod.rs` - Exports new modules
 
 ---
 
@@ -252,11 +272,11 @@ bluetooth_device_filter = []
 | Transport Config | ✅ Complete | 100% |
 | Documentation | ✅ Complete | 100% |
 | TransportManager Integration | ✅ Complete | 100% |
-| Bluetooth Discovery | ⏳ Not Started | 0% |
+| Bluetooth Discovery | ✅ Complete | 100% |
 | Plugin Compatibility | ⏳ Not Started | 0% |
 | Integration Tests | ⏳ Not Started | 0% |
 
-**Overall Progress:** 90% Complete
+**Overall Progress:** 95% Complete
 
 ---
 
