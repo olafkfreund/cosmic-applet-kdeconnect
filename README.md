@@ -51,6 +51,8 @@ cosmic-connect-core (Shared Library)
 
 ```
 cosmic-connect-desktop-app/
+├── cosmic-connect-core/      # Shared TLS & crypto layer (git submodule)
+│   └── src/                  # Core connection handling, TLS, discovery
 ├── cosmic-connect-protocol/  # Desktop-specific protocol extensions
 │   ├── connection/           # Connection management
 │   ├── device/               # Device state tracking
@@ -69,6 +71,8 @@ cosmic-connect-desktop-app/
     ├── development/          # Development guides
     └── project/              # Project management
 ```
+
+Note: `cosmic-connect-core` is a git submodule. Initialize with `git submodule update --init --recursive`
 
 ## Features
 
@@ -196,25 +200,26 @@ sudo pacman -S libxkbcommon wayland dbus pkg-config cmake
 ### NixOS (Recommended)
 
 ```bash
-# 1. Clone cosmic-connect-core (required dependency)
-cd ~/Source/GitHub/
-git clone https://github.com/olafkfreund/cosmic-connect-core
-
-# 2. Clone this repository
-git clone https://github.com/olafkfreund/cosmic-connect-desktop-app
+# 1. Clone this repository with submodules
+git clone --recurse-submodules https://github.com/olafkfreund/cosmic-connect-desktop-app
 cd cosmic-connect-desktop-app
 
-# 3. Enter development shell (installs all dependencies)
+# 2. Enter development shell (installs all dependencies)
 nix develop
 
-# 4. Build the project
+# 3. Build the project
 cargo build
 
-# 5. Run the daemon (in background)
+# 4. Run the daemon (in background)
 ./target/debug/cosmic-connect-daemon &
 
-# 6. Run the applet
+# 5. Run the applet
 ./target/debug/cosmic-applet-connect
+```
+
+Note: If you already cloned without `--recurse-submodules`, initialize submodules with:
+```bash
+git submodule update --init --recursive
 ```
 
 ### Other Linux Distributions
@@ -225,12 +230,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # 2. Install system dependencies (see above)
 
-# 3. Clone cosmic-connect-core
-cd ~/Source/GitHub/
-git clone https://github.com/olafkfreund/cosmic-connect-core
-
-# 4. Clone and build
-git clone https://github.com/olafkfreund/cosmic-connect-desktop-app
+# 3. Clone with submodules and build
+git clone --recurse-submodules https://github.com/olafkfreund/cosmic-connect-desktop-app
 cd cosmic-connect-desktop-app
 cargo build --release
 ```
