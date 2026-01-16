@@ -1,8 +1,10 @@
 # Rust
 target/
-Cargo.lock
 **/*.rs.bk
 *.pdb
+
+# Note: Cargo.lock is committed for applications (not libraries)
+# This ensures reproducible builds and is required for NixOS flakes
 
 # IDE
 .idea/
