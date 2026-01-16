@@ -111,7 +111,9 @@ cosmic-connect-desktop-app/
 
 #### Quality Assurance
 
-- **114 Unit Tests** + 12 Integration Tests
+- **43 Integration Tests** - Comprehensive end-to-end plugin testing
+- **Automated Testing Suite** - Unit tests + integration tests covering all plugins
+- **Real Device Testing Tools** - Interactive testing scripts for validation
 - **CI/CD Pipeline** - GitHub Actions automation
 - **Pre-commit Hooks** - Code quality enforcement
 - **Error Diagnostics** - Comprehensive error handling
@@ -387,20 +389,54 @@ The skill provides 7 specialized agents covering architecture, theming, applets,
 
 ### Testing
 
+#### Automated Tests
+
 ```bash
-# Run all tests
+# Run all tests (unit + integration)
 cargo test
 
-# Run specific crate tests
-cargo test -p cosmic-connect-protocol
-cargo test -p cosmic-connect-daemon
+# Run integration tests specifically
+cargo test --test plugin_integration_tests
 
 # Run with verbose output
 cargo test -- --nocapture
 
-# Run integration tests only
-cargo test --test '*'
+# Run with coverage
+cargo install cargo-tarpaulin
+cargo tarpaulin --out Html --output-dir target/coverage
+
+# Run specific crate tests
+cargo test -p cosmic-connect-protocol
+cargo test -p cosmic-connect-daemon
 ```
+
+#### Real Device Testing
+
+```bash
+# Interactive testing menu
+./scripts/test-plugins.sh --interactive
+
+# Automated tests with auto-detected device
+./scripts/test-plugins.sh
+
+# Comprehensive test suite on specific device
+./scripts/test-plugins.sh --all <device_id>
+
+# Show help
+./scripts/test-plugins.sh --help
+```
+
+**Testing Documentation:**
+- **[Automated Testing Guide](docs/AUTOMATED_TESTING.md)** - Integration test suite documentation
+- **[Plugin Testing Guide](docs/PLUGIN_TESTING_GUIDE.md)** - Manual testing with real devices
+- **[Testing Scripts](scripts/README.md)** - Testing script documentation
+
+**Test Coverage:**
+- 43 integration tests covering all 12 plugins
+- End-to-end workflow validation (clipboard sync, share, MPRIS, etc.)
+- Multi-device scenarios
+- Plugin lifecycle testing
+- Packet routing and capability matching
 
 ### Code Quality
 
@@ -552,10 +588,13 @@ See [Issue #52](https://github.com/olafkfreund/cosmic-connect-desktop-app/issues
 - **[Architecture](docs/architecture/Architecture.md)** - System design and multi-platform architecture
 - **[Protocol Specification](docs/architecture/Protocol.md)** - KDE Connect protocol details
 - **[Development Guide](docs/development/Development-Guide.md)** - Complete development documentation
+- **[Automated Testing](docs/AUTOMATED_TESTING.md)** - Integration test suite guide
+- **[Plugin Testing](docs/PLUGIN_TESTING_GUIDE.md)** - Manual testing with real devices
 - **[Contributing Guidelines](docs/development/Contributing.md)** - How to contribute
 - **[Project Status](docs/project/Status.md)** - Current implementation status
 - **[User Guide](docs/USER_GUIDE.md)** - End-user setup and usage
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
+- **[Debugging](docs/DEBUGGING.md)** - Debug tools and techniques
 
 ### Development Documentation
 
@@ -605,14 +644,17 @@ Contributions are welcome! Please see:
 ## Build Status
 
 - **Builds Successfully** on NixOS with Nix flake
-- **114 Tests Passing** + 12 integration tests
+- **43 Integration Tests** - All passing with comprehensive plugin coverage
+- **Automated Testing Infrastructure** - Integration tests + real device testing tools
 - **CI/CD Configured** with GitHub Actions
-- **Production Ready** for COSMIC Desktop
+- **Production Ready** for COSMIC Desktop (98% complete)
 
 Latest updates:
+- Comprehensive integration testing suite (43 tests)
+- Interactive plugin testing script with menu-driven interface
+- Complete testing documentation (automated + manual guides)
+- Plugin integration complete with UI actions and background tasks
 - Successfully resolved naming conflicts between cosmic-connect-core crates
-- Reorganized documentation into structured docs/ directory
-- Architecture refactoring completed
 - All builds passing in Nix environment
 
 ## License
