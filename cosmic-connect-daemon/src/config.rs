@@ -195,6 +195,10 @@ pub struct PluginConfig {
     /// Enable SystemMonitor plugin
     #[serde(default = "default_true")]
     pub enable_systemmonitor: bool,
+
+    /// Enable Wake-on-LAN plugin
+    #[serde(default = "default_true")]
+    pub enable_wol: bool,
 }
 
 /// Storage paths configuration
@@ -324,6 +328,7 @@ impl Default for PluginConfig {
             enable_presenter: false,      // Specialized use case - reduce packet size
             enable_contacts: false,       // Reduce packet size - can be enabled if needed
             enable_systemmonitor: true,   // Desktop-to-desktop system monitoring
+            enable_wol: true,             // Desktop-to-desktop Wake-on-LAN
         }
     }
 }

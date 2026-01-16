@@ -21,7 +21,7 @@ use cosmic_connect_protocol::{
         ping::PingPluginFactory, presenter::PresenterPluginFactory,
         remoteinput::RemoteInputPluginFactory, runcommand::RunCommandPluginFactory,
         share::SharePluginFactory, systemmonitor::SystemMonitorPluginFactory,
-        telephony::TelephonyPluginFactory, PluginManager,
+        telephony::TelephonyPluginFactory, wol::WolPluginFactory, PluginManager,
     },
     transport::{TransportPreference, TransportType},
     CertificateInfo, DeviceInfo, DeviceManager, DeviceType, TransportManager,
@@ -372,6 +372,13 @@ impl Daemon {
             manager
                 .register_factory(Arc::new(SystemMonitorPluginFactory))
                 .context("Failed to register SystemMonitor plugin factory")?;
+        }
+
+        if config.plugins.enable_wol {
+            info!("Registering Wake-on-LAN plugin factory");
+            manager
+                .register_factory(Arc::new(WolPluginFactory))
+                .context("Failed to register WOL plugin factory")?;
         }
 
         info!(

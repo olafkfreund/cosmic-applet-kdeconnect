@@ -112,6 +112,7 @@ pub mod runcommand;
 pub mod share;
 pub mod systemmonitor;
 pub mod telephony;
+pub mod wol;
 
 use crate::{Device, Packet, ProtocolError, Result};
 use async_trait::async_trait;

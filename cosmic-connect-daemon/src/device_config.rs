@@ -33,6 +33,10 @@ pub struct DeviceConfig {
     /// Show notifications for this device
     #[serde(default = "default_true")]
     pub show_notifications: bool,
+
+    /// MAC address for Wake-on-LAN
+    #[serde(default)]
+    pub mac_address: Option<String>,
 }
 
 /// Per-device plugin configuration
@@ -90,6 +94,7 @@ impl DeviceConfig {
             auto_accept_pairing: false,
             auto_connect: true,
             show_notifications: true,
+            mac_address: None,
         }
     }
 
