@@ -12,7 +12,8 @@ in {
   options.services.cosmic-connect = {
     enable = mkEnableOption "COSMIC Connect - Device connectivity for COSMIC Desktop";
 
-    package = mkPackageOption pkgs "cosmic-connect" {
+    package = mkOption {
+      type = types.package;
       default = cosmic-connect-pkg;
       example = literalExpression "pkgs.cosmic-connect";
       description = "The cosmic-connect package to use.";
@@ -267,8 +268,6 @@ in {
       (optional (!cfg.plugins.share && !cfg.plugins.notification && !cfg.plugins.clipboard)
         "All major plugins are disabled. Consider enabling at least one plugin for functionality.");
 
-    # Add documentation links
-    documentation.man.man1 = [ "${cfg.package}/share/man/man1/cosmic-connect-daemon.1.gz" ];
   };
 
   meta = {
