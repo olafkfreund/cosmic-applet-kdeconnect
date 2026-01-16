@@ -3,6 +3,7 @@
 //! This library provides a pure Rust implementation of the KDE Connect protocol,
 //! enabling device synchronization and communication between computers and mobile devices.
 
+pub mod bluetooth_connection_manager;
 pub mod connection;
 pub mod device;
 pub mod discovery;
@@ -15,6 +16,7 @@ pub mod recovery;
 pub mod recovery_coordinator;
 pub mod resource_manager;
 pub mod transport;
+pub mod transport_manager;
 
 mod error;
 
@@ -43,12 +45,14 @@ pub use plugins::{Plugin, PluginManager};
 pub use recovery::{RecoveryManager, ReconnectionStrategy, TransferState};
 pub use recovery_coordinator::RecoveryCoordinator;
 pub use resource_manager::{MemoryStats, ResourceConfig, ResourceManager, TransferInfo};
+pub use bluetooth_connection_manager::BluetoothConnectionManager;
 pub use transport::{
     BluetoothConnection, BluetoothTransportFactory, LatencyCategory, TcpConnection,
     TcpTransportFactory, Transport, TransportAddress, TransportCapabilities, TransportFactory,
     TransportPreference, TransportType, KDECONNECT_SERVICE_UUID, RFCOMM_READ_CHAR_UUID,
     RFCOMM_WRITE_CHAR_UUID,
 };
+pub use transport_manager::{TransportManager, TransportManagerConfig, TransportManagerEvent};
 
 /// Protocol version we implement
 /// Updated to version 8 to match latest KDE Connect Android app
