@@ -72,7 +72,7 @@ impl RecoveryCoordinator {
 
                         // Check if device is paired (only auto-reconnect to paired devices)
                         let dm = device_manager.read().await;
-                        let should_reconnect = if let Ok(device) = dm.get_device(&device_id) {
+                        let should_reconnect = if let Some(device) = dm.get_device(&device_id) {
                             device.is_paired() && device.is_trusted
                         } else {
                             false
@@ -104,12 +104,16 @@ impl RecoveryCoordinator {
                                 sleep(delay).await;
 
                                 // Get device info for connection
-                                let dm = device_manager_clone.read().await;
-                                let device_opt = dm.get_device(&device_id_clone);
-                                drop(dm);
+                                let (host_opt, port_opt) = {
+                                    let dm = device_manager_clone.read().await;
+                                    if let Some(device) = dm.get_device(&device_id_clone) {
+                                        (device.host.clone(), device.port)
+                                    } else {
+                                        (None, None)
+                                    }
+                                };
 
-                                if let Some(device) = device_opt {
-                                    if let (Some(host), Some(port)) = (device.host, device.port) {
+                                if let (Some(host), Some(port)) = (host_opt, port_opt) {
                                         info!(
                                             "Attempting reconnection to device {} at {}:{}",
                                             device_id_clone, host, port
@@ -143,12 +147,11 @@ impl RecoveryCoordinator {
                                                 host, port, device_id_clone
                                             );
                                         }
-                                    } else {
-                                        debug!(
-                                            "Device {} has no host/port info, cannot reconnect",
-                                            device_id_clone
-                                        );
-                                    }
+                                } else {
+                                    debug!(
+                                        "Device {} has no host/port info, cannot reconnect",
+                                        device_id_clone
+                                    );
                                 }
                             });
                         } else {

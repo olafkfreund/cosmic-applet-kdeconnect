@@ -437,7 +437,10 @@ impl TransportManager {
                     TransportAddress::Bluetooth {
                         address,
                         service_uuid,
-                    } => (address.clone(), *service_uuid),
+                    } => (
+                        address.clone(),
+                        service_uuid.unwrap_or(crate::transport::KDECONNECT_SERVICE_UUID),
+                    ),
                     _ => {
                         return Err(crate::ProtocolError::Transport(
                             "Invalid address type for Bluetooth transport".to_string(),

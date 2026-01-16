@@ -94,7 +94,7 @@ impl BluetoothConnectionManager {
         drop(connections);
 
         // Create Bluetooth connection
-        let connection = BluetoothConnection::connect(bt_address, service_uuid, self.timeout)
+        let connection = BluetoothConnection::connect(bt_address.to_string(), service_uuid)
             .await
             .map_err(|e| {
                 ProtocolError::Transport(format!(

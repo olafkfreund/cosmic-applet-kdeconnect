@@ -13,7 +13,7 @@ use btleplug::api::{
     Central, CentralEvent, Manager as _, Peripheral as _, ScanFilter, WriteType,
 };
 use btleplug::platform::{Adapter, Manager, Peripheral};
-use futures::stream::StreamExt;
+use futures::StreamExt;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
@@ -312,7 +312,8 @@ impl Transport for BluetoothConnection {
             .map_err(|e| ProtocolError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
 
         // Wait for notification with timeout
-        let notification = timeout(BT_TIMEOUT, notification_stream.next())
+        use futures::StreamExt;
+        let notification = timeout(BT_TIMEOUT, StreamExt::next(&mut notification_stream))
             .await
             .map_err(|_| {
                 ProtocolError::Io(std::io::Error::new(
@@ -371,8 +372,9 @@ impl Transport for BluetoothConnection {
     }
 
     fn is_connected(&self) -> bool {
-        // Check if peripheral is still connected
-        self.peripheral.is_connected()
+        // Check connection state
+        // Note: We use try_lock to avoid blocking, if locked assume connected
+        self.connected.try_lock().map(|guard| *guard).unwrap_or(true)
     }
 }
 
