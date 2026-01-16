@@ -883,12 +883,22 @@ impl CConnectApp {
         let quick_actions: Element<Message> = if device.is_connected && device.is_paired {
             let id1 = device.id.clone();
             let id2 = device.id.clone();
+            let id3 = device.id.clone();
+            let id4 = device.id.clone();
 
             row![
                 widget::button::icon(widget::icon::from_name("document-send-symbolic").size(16))
-                    .on_press(Message::QuickSendFile(id1)),
+                    .on_press(Message::QuickSendFile(id1))
+                    .tooltip("Send File"),
                 widget::button::icon(widget::icon::from_name("mail-send-symbolic").size(16))
-                    .on_press(Message::QuickNotification(id2)),
+                    .on_press(Message::QuickNotification(id2))
+                    .tooltip("Send Notification"),
+                widget::button::icon(widget::icon::from_name("camera-photo-symbolic").size(16))
+                    .on_press(Message::QuickScreenshot(id3))
+                    .tooltip("Request Screenshot"),
+                widget::button::icon(widget::icon::from_name("utilities-system-monitor-symbolic").size(16))
+                    .on_press(Message::QuickSystemMonitor(id4))
+                    .tooltip("View System Monitor"),
             ]
             .spacing(spacing.space_xxs)
             .align_y(Alignment::Center)
