@@ -153,31 +153,31 @@ pub fn init_logging(cli: &Cli) -> Result<()> {
 #[derive(Debug, Default)]
 pub struct Metrics {
     /// Daemon start time
-    start_time: Option<Instant>,
+    pub start_time: Option<Instant>,
 
     /// Total packets sent
-    packets_sent: u64,
+    pub packets_sent: u64,
 
     /// Total packets received
-    packets_received: u64,
+    pub packets_received: u64,
 
     /// Total bytes sent
-    bytes_sent: u64,
+    pub bytes_sent: u64,
 
     /// Total bytes received
-    bytes_received: u64,
+    pub bytes_received: u64,
 
     /// Number of active connections
-    active_connections: usize,
+    pub active_connections: usize,
 
     /// Number of paired devices
-    paired_devices: usize,
+    pub paired_devices: usize,
 
     /// Total plugin invocations
-    plugin_invocations: u64,
+    pub plugin_invocations: u64,
 
     /// Total plugin errors
-    plugin_errors: u64,
+    pub plugin_errors: u64,
 }
 
 impl Metrics {

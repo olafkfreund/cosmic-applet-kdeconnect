@@ -706,6 +706,7 @@ impl Daemon {
             self.pairing_service.clone(),
             self.mpris_manager.clone(),
             self.pending_pairing_requests.clone(),
+            self.metrics.clone(),
         )
         .await
         .context("Failed to start DBus server")?;

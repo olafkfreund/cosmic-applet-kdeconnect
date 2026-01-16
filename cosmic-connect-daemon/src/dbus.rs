@@ -72,6 +72,33 @@ pub struct BatteryStatus {
     pub is_charging: bool,
 }
 
+/// Daemon performance metrics for DBus serialization
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, zbus::zvariant::Type)]
+pub struct DaemonMetrics {
+    /// Uptime in seconds
+    pub uptime_seconds: u64,
+    /// Total packets sent
+    pub packets_sent: u64,
+    /// Total packets received
+    pub packets_received: u64,
+    /// Total bytes sent
+    pub bytes_sent: u64,
+    /// Total bytes received
+    pub bytes_received: u64,
+    /// Number of active connections
+    pub active_connections: u32,
+    /// Number of paired devices
+    pub paired_devices: u32,
+    /// Total plugin invocations
+    pub plugin_invocations: u64,
+    /// Total plugin errors
+    pub plugin_errors: u64,
+    /// Packets per second (averaged)
+    pub packets_per_second: f64,
+    /// Bandwidth in bytes per second (averaged)
+    pub bandwidth_bps: f64,
+}
+
 /// DBus interface for KDE Connect daemon
 pub struct KdeConnectInterface {
     /// Device manager
@@ -90,6 +117,8 @@ pub struct KdeConnectInterface {
     pending_pairing_requests: Arc<RwLock<HashMap<String, bool>>>,
     /// DBus connection for emitting signals
     dbus_connection: Connection,
+    /// Performance metrics (if enabled)
+    metrics: Option<Arc<RwLock<crate::diagnostics::Metrics>>>,
 }
 
 impl KdeConnectInterface {
@@ -103,6 +132,7 @@ impl KdeConnectInterface {
         mpris_manager: Option<Arc<crate::mpris_manager::MprisManager>>,
         pending_pairing_requests: Arc<RwLock<HashMap<String, bool>>>,
         dbus_connection: Connection,
+        metrics: Option<Arc<RwLock<crate::diagnostics::Metrics>>>,
     ) -> Self {
         Self {
             device_manager,
@@ -113,6 +143,7 @@ impl KdeConnectInterface {
             mpris_manager,
             pending_pairing_requests,
             dbus_connection,
+            metrics,
         }
     }
 }
@@ -1025,6 +1056,33 @@ impl KdeConnectInterface {
         Ok(())
     }
 
+    /// Get daemon performance metrics
+    ///
+    /// Returns performance metrics if metrics collection is enabled.
+    /// Returns an error if metrics are disabled (use --metrics flag to enable).
+    async fn get_metrics(&self) -> Result<DaemonMetrics, zbus::fdo::Error> {
+        let metrics = self.metrics.as_ref().ok_or_else(|| {
+            zbus::fdo::Error::Failed(
+                "Metrics not enabled. Start daemon with --metrics flag to enable".to_string()
+            )
+        })?;
+
+        let m = metrics.read().await;
+        Ok(DaemonMetrics {
+            uptime_seconds: m.uptime_seconds(),
+            packets_sent: m.packets_sent,
+            packets_received: m.packets_received,
+            bytes_sent: m.bytes_sent,
+            bytes_received: m.bytes_received,
+            active_connections: m.active_connections as u32,
+            paired_devices: m.paired_devices as u32,
+            plugin_invocations: m.plugin_invocations,
+            plugin_errors: m.plugin_errors,
+            packets_per_second: m.packets_per_second(),
+            bandwidth_bps: m.bandwidth_bps(),
+        })
+    }
+
     /// Get list of available MPRIS media players
     ///
     /// Returns list of player names that can be controlled.
@@ -1269,6 +1327,7 @@ impl DbusServer {
         pairing_service: Option<Arc<RwLock<cosmic_connect_protocol::pairing::PairingService>>>,
         mpris_manager: Option<Arc<crate::mpris_manager::MprisManager>>,
         pending_pairing_requests: Arc<RwLock<std::collections::HashMap<String, bool>>>,
+        metrics: Option<Arc<RwLock<crate::diagnostics::Metrics>>>,
     ) -> Result<Self> {
         info!("Starting DBus server on {}", SERVICE_NAME);
 
@@ -1288,6 +1347,7 @@ impl DbusServer {
             mpris_manager,
             pending_pairing_requests,
             connection.clone(),
+            metrics,
         );
 
         // Serve the interface BEFORE requesting the name
