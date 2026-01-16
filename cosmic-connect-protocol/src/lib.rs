@@ -11,6 +11,8 @@ pub mod packet;
 pub mod pairing;
 pub mod payload;
 pub mod plugins;
+pub mod recovery;
+pub mod recovery_coordinator;
 pub mod transport;
 
 mod error;
@@ -37,6 +39,8 @@ pub use pairing::{
 };
 pub use payload::{FileTransferInfo, PayloadClient, PayloadServer};
 pub use plugins::{Plugin, PluginManager};
+pub use recovery::{RecoveryManager, ReconnectionStrategy, TransferState};
+pub use recovery_coordinator::RecoveryCoordinator;
 pub use transport::TcpConnection;
 
 /// Protocol version we implement
