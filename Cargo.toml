@@ -23,7 +23,8 @@ rust-version = "1.70"
 libcosmic = { git = "https://github.com/pop-os/libcosmic", default-features = false }
 
 # Shared Cosmic Connect Core (TLS and crypto layer)
-cosmic-connect-core = { path = "./cosmic-connect-core" }
+# Using git dependency instead of path for better Nix flake support
+cosmic-connect-core = { git = "https://github.com/olafkfreund/cosmic-connect-core.git", branch = "main" }
 
 # Protocol implementation
 cosmic-connect-protocol = { path = "./cosmic-connect-protocol" }

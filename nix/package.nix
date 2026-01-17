@@ -31,15 +31,26 @@
 , atk
 , pipewire
 , stdenv
+, llvmPackages
 }:
 
 rustPlatform.buildRustPackage rec {
   pname = "cosmic-connect";
   version = "0.1.0";
 
-  # Use root directory directly to include submodules
-  # Don't use cleanSource as it excludes .git directories and submodules
-  src = ../.;
+  # Use root directory, excluding cosmic-connect-core (git submodule)
+  # Cargo will fetch cosmic-connect-core as a git dependency via allowBuiltinFetchGit
+  src = lib.fileset.toSource {
+    root = ../.;
+    fileset = lib.fileset.unions [
+      ../Cargo.toml
+      ../Cargo.lock
+      ../cosmic-connect-protocol
+      ../cosmic-applet-connect
+      ../cosmic-connect
+      ../cosmic-connect-daemon
+    ];
+  };
 
   cargoLock = {
     lockFile = ../Cargo.lock;
@@ -51,6 +62,7 @@ rustPlatform.buildRustPackage rec {
   nativeBuildInputs = [
     pkg-config
     cmake
+    llvmPackages.libclang.lib  # libclang for bindgen (RemoteDesktop plugin)
   ];
 
   buildInputs = [
@@ -97,7 +109,8 @@ rustPlatform.buildRustPackage rec {
   ];
 
   # Set environment variables for build
-  LIBCLANG_PATH = "${stdenv.cc.cc.lib}/lib";
+  LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
+  BINDGEN_EXTRA_CLANG_ARGS = "-I${stdenv.cc.libc.dev}/include";
 
   # Ensure proper library paths at runtime
   postInstall = ''

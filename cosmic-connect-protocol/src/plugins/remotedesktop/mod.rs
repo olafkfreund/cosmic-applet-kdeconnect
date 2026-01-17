@@ -205,7 +205,7 @@ impl Plugin for RemoteDesktopPlugin {
 
 impl RemoteDesktopPlugin {
     /// Handle remote desktop session request
-    async fn handle_request(&mut self, _packet: &Packet, device: &mut Device) -> Result<()> {
+    async fn handle_request(&mut self, packet: &Packet, device: &mut Device) -> Result<()> {
         info!(
             "Received remote desktop request from {}",
             device.name()
