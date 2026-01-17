@@ -232,6 +232,10 @@ pub struct PluginConfig {
     /// Enable FileSync plugin (automatic file synchronization)
     #[serde(default = "default_false")]
     pub enable_filesync: bool,
+
+    /// Enable ScreenShare plugin (one-way screen sharing for presentations)
+    #[serde(default = "default_false")]
+    pub enable_screenshare: bool,
 }
 
 /// Storage paths configuration
@@ -371,6 +375,7 @@ impl Default for PluginConfig {
             enable_chat: true,            // Instant messaging enabled by default
             enable_audiostream: false,    // Audio streaming disabled by default (requires audio backend)
             enable_filesync: false,       // File sync disabled by default (requires file system integration)
+            enable_screenshare: false,    // Screen share disabled by default (requires screen capture)
         }
     }
 }

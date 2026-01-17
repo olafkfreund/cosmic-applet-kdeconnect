@@ -24,8 +24,9 @@ use cosmic_connect_protocol::{
         power::PowerPluginFactory, presenter::PresenterPluginFactory,
         r#macro::MacroPluginFactory, remoteinput::RemoteInputPluginFactory,
         runcommand::RunCommandPluginFactory, screenshot::ScreenshotPluginFactory,
-        share::SharePluginFactory, systemmonitor::SystemMonitorPluginFactory,
-        telephony::TelephonyPluginFactory, wol::WolPluginFactory, PluginManager,
+        screenshare::ScreenSharePluginFactory, share::SharePluginFactory,
+        systemmonitor::SystemMonitorPluginFactory, telephony::TelephonyPluginFactory,
+        wol::WolPluginFactory, PluginManager,
     },
     CertificateInfo, DeviceInfo, DeviceManager, DeviceType, TransportManager,
     TransportManagerConfig, TransportManagerEvent,
@@ -447,6 +448,13 @@ impl Daemon {
             manager
                 .register_factory(Arc::new(FileSyncPluginFactory))
                 .context("Failed to register FileSync plugin factory")?;
+        }
+
+        if config.plugins.enable_screenshare {
+            info!("Registering ScreenShare plugin factory");
+            manager
+                .register_factory(Arc::new(ScreenSharePluginFactory))
+                .context("Failed to register ScreenShare plugin factory")?;
         }
 
         info!(

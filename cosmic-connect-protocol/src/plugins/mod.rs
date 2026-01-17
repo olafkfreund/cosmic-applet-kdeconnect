@@ -118,6 +118,7 @@ pub mod remotedesktop;
 pub mod remoteinput;
 pub mod runcommand;
 pub mod screenshot;
+pub mod screenshare;
 pub mod share;
 pub mod systemmonitor;
 pub mod telephony;
