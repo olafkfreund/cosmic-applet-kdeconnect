@@ -228,6 +228,10 @@ pub struct PluginConfig {
     /// Enable AudioStream plugin (audio streaming between desktops)
     #[serde(default = "default_false")]
     pub enable_audiostream: bool,
+
+    /// Enable FileSync plugin (automatic file synchronization)
+    #[serde(default = "default_false")]
+    pub enable_filesync: bool,
 }
 
 /// Storage paths configuration
@@ -366,6 +370,7 @@ impl Default for PluginConfig {
             enable_macro: false,          // Security: automation disabled by default
             enable_chat: true,            // Instant messaging enabled by default
             enable_audiostream: false,    // Audio streaming disabled by default (requires audio backend)
+            enable_filesync: false,       // File sync disabled by default (requires file system integration)
         }
     }
 }

@@ -105,6 +105,7 @@ pub mod chat;
 pub mod clipboard;
 pub mod clipboardhistory;
 pub mod contacts;
+pub mod filesync;
 pub mod findmyphone;
 pub mod lock;
 pub mod r#macro;

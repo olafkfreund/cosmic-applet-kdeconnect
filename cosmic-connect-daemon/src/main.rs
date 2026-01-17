@@ -18,14 +18,14 @@ use cosmic_connect_protocol::{
         audiostream::AudioStreamPluginFactory, battery::BatteryPluginFactory,
         chat::ChatPluginFactory, clipboard::ClipboardPluginFactory,
         clipboardhistory::ClipboardHistoryPluginFactory, contacts::ContactsPluginFactory,
-        findmyphone::FindMyPhonePluginFactory, lock::LockPluginFactory,
-        mpris::MprisPluginFactory, notification::NotificationPluginFactory,
-        ping::PingPluginFactory, power::PowerPluginFactory,
-        presenter::PresenterPluginFactory, r#macro::MacroPluginFactory,
-        remoteinput::RemoteInputPluginFactory, runcommand::RunCommandPluginFactory,
-        screenshot::ScreenshotPluginFactory, share::SharePluginFactory,
-        systemmonitor::SystemMonitorPluginFactory, telephony::TelephonyPluginFactory,
-        wol::WolPluginFactory, PluginManager,
+        filesync::FileSyncPluginFactory, findmyphone::FindMyPhonePluginFactory,
+        lock::LockPluginFactory, mpris::MprisPluginFactory,
+        notification::NotificationPluginFactory, ping::PingPluginFactory,
+        power::PowerPluginFactory, presenter::PresenterPluginFactory,
+        r#macro::MacroPluginFactory, remoteinput::RemoteInputPluginFactory,
+        runcommand::RunCommandPluginFactory, screenshot::ScreenshotPluginFactory,
+        share::SharePluginFactory, systemmonitor::SystemMonitorPluginFactory,
+        telephony::TelephonyPluginFactory, wol::WolPluginFactory, PluginManager,
     },
     CertificateInfo, DeviceInfo, DeviceManager, DeviceType, TransportManager,
     TransportManagerConfig, TransportManagerEvent,
@@ -440,6 +440,13 @@ impl Daemon {
             manager
                 .register_factory(Arc::new(AudioStreamPluginFactory))
                 .context("Failed to register AudioStream plugin factory")?;
+        }
+
+        if config.plugins.enable_filesync {
+            info!("Registering FileSync plugin factory");
+            manager
+                .register_factory(Arc::new(FileSyncPluginFactory))
+                .context("Failed to register FileSync plugin factory")?;
         }
 
         info!(
