@@ -214,11 +214,10 @@ impl LockPlugin {
                         if set_locked { "locked" } else { "unlocked" }
                     );
 
-                    // Send state update back
-                    let state_packet = self.create_lock_state(set_locked);
-                    if let Err(e) = device.send_packet(&state_packet).await {
-                        warn!("Failed to send lock state update: {}", e);
-                    }
+                    // TODO: Send state update back to device
+                    // Need to implement packet sending infrastructure
+                    // let state_packet = self.create_lock_state(set_locked);
+                    // device.send_packet(&state_packet).await?;
                 }
                 Err(e) => {
                     warn!(
@@ -246,10 +245,10 @@ impl LockPlugin {
             match self.query_lock_state().await {
                 Ok(locked) => {
                     self.is_locked = locked;
-                    let state_packet = self.create_lock_state(locked);
-                    if let Err(e) = device.send_packet(&state_packet).await {
-                        warn!("Failed to send lock state: {}", e);
-                    }
+                    // TODO: Send state update back to device
+                    // Need to implement packet sending infrastructure
+                    // let state_packet = self.create_lock_state(locked);
+                    // device.send_packet(&state_packet).await?;
                 }
                 Err(e) => {
                     warn!("Failed to query lock state: {}", e);
@@ -288,7 +287,7 @@ impl LockPlugin {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             warn!("loginctl lock-session failed: {}", stderr);
-            return Err(crate::ProtocolError::Other(format!(
+            return Err(crate::ProtocolError::invalid_state(format!(
                 "Failed to lock desktop: {}",
                 stderr
             )));
@@ -311,7 +310,7 @@ impl LockPlugin {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             warn!("loginctl unlock-session failed: {}", stderr);
-            return Err(crate::ProtocolError::Other(format!(
+            return Err(crate::ProtocolError::invalid_state(format!(
                 "Failed to unlock desktop: {}",
                 stderr
             )));
@@ -430,6 +429,20 @@ impl PluginFactory for LockPluginFactory {
 
     fn name(&self) -> &str {
         "lock"
+    }
+
+    fn incoming_capabilities(&self) -> Vec<String> {
+        vec![
+            "cconnect.lock.request".to_string(),
+            "cconnect.lock".to_string(),
+        ]
+    }
+
+    fn outgoing_capabilities(&self) -> Vec<String> {
+        vec![
+            "cconnect.lock.request".to_string(),
+            "cconnect.lock".to_string(),
+        ]
     }
 }
 

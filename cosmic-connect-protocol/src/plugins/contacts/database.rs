@@ -49,7 +49,7 @@
 //! db.upsert_contact(contact).await?;
 //! ```
 
-use anyhow::{Context, Result};
+use crate::Result;
 use std::path::Path;
 use tracing::{debug, info, warn};
 

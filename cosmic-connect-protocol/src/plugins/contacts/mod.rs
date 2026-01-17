@@ -36,7 +36,6 @@ use tracing::{debug, info, warn};
 
 // Re-export for external use
 pub use database::{Contact as ContactData, Email as EmailAddress, PhoneNumber as PhoneInfo};
-pub use signals::ContactEvent;
 
 /// Packet type for requesting all contact UIDs with timestamps
 pub const PACKET_TYPE_REQUEST_ALL_UIDS_TIMESTAMPS: &str =
