@@ -124,6 +124,17 @@ in {
         default = true;
         description = "Enable ping functionality for testing connectivity.";
       };
+
+      remotedesktop = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Enable RemoteDesktop plugin (VNC-based remote desktop).
+          Allows screen sharing and remote control between devices.
+          Requires PipeWire and Wayland portal support.
+          Security: Disabled by default, requires explicit opt-in.
+        '';
+      };
     };
 
     security = {

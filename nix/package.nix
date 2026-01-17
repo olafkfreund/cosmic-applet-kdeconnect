@@ -29,6 +29,7 @@
 , cairo
 , gdk-pixbuf
 , atk
+, pipewire
 , stdenv
 }:
 
@@ -79,12 +80,15 @@ rustPlatform.buildRustPackage rec {
     cairo
     gdk-pixbuf
     atk
+    pipewire  # RemoteDesktop plugin dependency
   ];
 
-  # Build all workspace members
+  # Build all workspace members with RemoteDesktop feature
   cargoBuildFlags = [
     "--workspace"
     "--bins"
+    "--features"
+    "cosmic-connect-daemon/remotedesktop"
   ];
 
   # Test all workspace members
@@ -159,6 +163,7 @@ rustPlatform.buildRustPackage rec {
       - Battery status monitoring
       - Media player control (MPRIS)
       - Remote input
+      - Remote desktop (VNC-based screen sharing)
       - SMS messaging
       - CConnect protocol (port 1816, side-by-side with KDE Connect)
 
@@ -166,6 +171,8 @@ rustPlatform.buildRustPackage rec {
       - cosmic-applet-connect: Panel applet for COSMIC
       - cosmic-connect-daemon: Background service (DBus, systemd)
       - cosmic-connect: CLI tool for device management
+
+      Built with RemoteDesktop plugin support (requires PipeWire).
     '';
     homepage = "https://github.com/olafkfreund/cosmic-connect-desktop-app";
     changelog = "https://github.com/olafkfreund/cosmic-connect-desktop-app/releases";

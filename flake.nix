@@ -51,6 +51,9 @@
           dbus
           libpulseaudio
           expat
+
+          # RemoteDesktop plugin dependencies
+          pipewire
         ];
 
         # Build dependencies
@@ -59,8 +62,15 @@
           pkg-config
           cmake
           just
+
+          # OpenSSL (both runtime and dev headers)
           openssl
-          
+          openssl.dev
+
+          # DBus (both runtime and dev headers)
+          dbus
+          dbus.dev
+
           # COSMIC specific
           libxkbcommon
           wayland
@@ -83,7 +93,7 @@
 
         # Shell environment
         shellHook = ''
-          echo "🚀 COSMIC KDE Connect Applet Development Environment"
+          echo "🚀 COSMIC Connect Development Environment"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "Rust version: $(rustc --version)"
           echo "Cargo version: $(cargo --version)"
@@ -94,19 +104,44 @@
           echo "  just test           - Run tests"
           echo "  just fmt            - Format code"
           echo "  just lint           - Run clippy"
+          echo "  cargo check         - Fast compilation check"
+          echo "  cargo build         - Full build"
           echo ""
           echo "🔧 Environment configured for COSMIC Desktop development"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          
+
           # Set up environment variables
           export RUST_BACKTRACE=1
           export RUST_LOG=debug
-          
+
           # Library paths for runtime
           export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath runtimeInputs}:$LD_LIBRARY_PATH"
-          
-          # PKG_CONFIG paths
+
+          # PKG_CONFIG paths - critical for finding dbus-1.pc and openssl.pc
           export PKG_CONFIG_PATH="${pkgs.lib.makeSearchPath "lib/pkgconfig" buildInputs}:$PKG_CONFIG_PATH"
+
+          # Bindgen needs to find C standard library headers for PipeWire bindings
+          export BINDGEN_EXTRA_CLANG_ARGS="-I${pkgs.glibc.dev}/include"
+
+          # Verify critical dependencies are available
+          echo ""
+          echo "🔍 Verifying development dependencies..."
+
+          if pkg-config --exists dbus-1; then
+            echo "  ✓ dbus-1 found: $(pkg-config --modversion dbus-1)"
+          else
+            echo "  ✗ dbus-1 NOT FOUND - build will fail!"
+          fi
+
+          if pkg-config --exists openssl; then
+            echo "  ✓ openssl found: $(pkg-config --modversion openssl)"
+          else
+            echo "  ✗ openssl NOT FOUND - build will fail!"
+          fi
+
+          echo ""
+          echo "Ready to build! Try: cargo check"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         '';
 
       in
