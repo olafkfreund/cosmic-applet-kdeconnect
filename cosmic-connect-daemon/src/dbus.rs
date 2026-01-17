@@ -150,6 +150,37 @@ impl CConnectInterface {
             config,
         }
     }
+
+    /// Emit a device plugin state changed signal
+    async fn emit_plugin_state_changed(&self, device_id: &str, plugin_name: &str, enabled: bool) {
+        let object_server = self.dbus_connection.object_server();
+        let iface_ref = match object_server
+            .interface::<_, CConnectInterface>(OBJECT_PATH)
+            .await
+        {
+            Ok(iface) => iface,
+            Err(e) => {
+                warn!("Failed to get interface for signal emission: {}", e);
+                return;
+            }
+        };
+
+        if let Err(e) = Self::device_plugin_state_changed(
+            iface_ref.signal_context(),
+            device_id,
+            plugin_name,
+            enabled,
+        )
+        .await
+        {
+            warn!("Failed to emit device_plugin_state_changed signal: {}", e);
+        } else {
+            debug!(
+                "Emitted device_plugin_state_changed signal: {} on {} = {}",
+                plugin_name, device_id, enabled
+            );
+        }
+    }
 }
 
 #[interface(name = "com.system76.CosmicConnect")]
@@ -935,6 +966,9 @@ impl CConnectInterface {
             device_id
         );
 
+        self.emit_plugin_state_changed(&device_id, &plugin_name, enabled)
+            .await;
+
         Ok(())
     }
 
@@ -953,14 +987,33 @@ impl CConnectInterface {
             device_id, plugin_name
         );
 
-        let mut registry = self.device_config_registry.write().await;
-        let config = registry.get_or_create(&device_id);
+        // Get the resulting enabled state after clearing override (will use global config)
+        let enabled = {
+            let mut registry = self.device_config_registry.write().await;
+            {
+                let config = registry.get_or_create(&device_id);
+                config.clear_plugin_override(&plugin_name);
+            } // config borrow ends here
 
-        config.clear_plugin_override(&plugin_name);
+            registry.save().map_err(|e| {
+                zbus::fdo::Error::Failed(format!("Failed to save device config: {}", e))
+            })?;
 
-        registry.save().map_err(|e| {
-            zbus::fdo::Error::Failed(format!("Failed to save device config: {}", e))
-        })?;
+            // Get global config to determine final state
+            let global_config = self.config.read().await;
+            let config = registry.get(&device_id).unwrap(); // Safe: we just created it
+            config.is_plugin_enabled(&plugin_name, &global_config.plugins)
+        };
+
+        info!(
+            "DBus: Plugin override cleared for {} on device {}, now using global config ({})",
+            plugin_name,
+            device_id,
+            if enabled { "enabled" } else { "disabled" }
+        );
+
+        self.emit_plugin_state_changed(&device_id, &plugin_name, enabled)
+            .await;
 
         Ok(())
     }
@@ -985,6 +1038,64 @@ impl CConnectInterface {
             .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to serialize config: {}", e)))?;
 
         Ok(json)
+    }
+
+    /// Get RemoteDesktop settings for a device as JSON
+    ///
+    /// Returns the RemoteDesktop-specific settings (quality, fps, resolution)
+    /// for the specified device, or defaults if not configured.
+    ///
+    /// # Arguments
+    /// * `device_id` - The device ID
+    ///
+    /// # Returns
+    /// JSON string with RemoteDesktop settings
+    async fn get_remotedesktop_settings(&self, device_id: String) -> Result<String, zbus::fdo::Error> {
+        debug!("DBus: GetRemoteDesktopSettings called for {}", device_id);
+
+        let registry = self.device_config_registry.read().await;
+        let config = registry.get(&device_id).ok_or_else(|| {
+            zbus::fdo::Error::Failed(format!("No config for device: {}", device_id))
+        })?;
+
+        let settings = config.get_remotedesktop_settings();
+        let json = serde_json::to_string_pretty(&settings)
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Serialization failed: {}", e)))?;
+
+        Ok(json)
+    }
+
+    /// Set RemoteDesktop settings for a device
+    ///
+    /// Updates the RemoteDesktop-specific settings for the specified device.
+    ///
+    /// # Arguments
+    /// * `device_id` - The device ID
+    /// * `settings_json` - JSON string with RemoteDesktop settings
+    async fn set_remotedesktop_settings(
+        &self,
+        device_id: String,
+        settings_json: String,
+    ) -> Result<(), zbus::fdo::Error> {
+        info!(
+            "DBus: SetRemoteDesktopSettings called for {}",
+            device_id
+        );
+
+        let settings: crate::device_config::RemoteDesktopSettings =
+            serde_json::from_str(&settings_json)
+                .map_err(|e| zbus::fdo::Error::Failed(format!("Invalid settings: {}", e)))?;
+
+        let mut registry = self.device_config_registry.write().await;
+        let config = registry.get_or_create(&device_id);
+        config.set_remotedesktop_settings(settings);
+
+        registry.save().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("Save failed: {}", e))
+        })?;
+
+        info!("DBus: RemoteDesktop settings updated for {}", device_id);
+        Ok(())
     }
 
     /// Add a run command for a device
@@ -1703,6 +1814,23 @@ impl CConnectInterface {
         device_id: &str,
         plugin: &str,
         data: &str,
+    ) -> zbus::Result<()>;
+
+    /// Signal: Device plugin state changed
+    ///
+    /// Emitted when a plugin is enabled or disabled for a specific device.
+    /// Allows UI clients to update in real-time without polling or daemon restart.
+    ///
+    /// # Arguments
+    /// * `device_id` - The device ID
+    /// * `plugin_name` - Plugin name (e.g., "battery", "remotedesktop")
+    /// * `enabled` - Whether the plugin is now enabled
+    #[zbus(signal)]
+    async fn device_plugin_state_changed(
+        signal_context: &SignalContext<'_>,
+        device_id: &str,
+        plugin_name: &str,
+        enabled: bool,
     ) -> zbus::Result<()>;
 
     /// Signal: File transfer progress
