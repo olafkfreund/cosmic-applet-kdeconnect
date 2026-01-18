@@ -282,6 +282,13 @@ Note: `cosmic-connect-core` is a git submodule. Initialize with `git submodule u
 
 ### Recently Completed
 
+**Q1 2026**
+- DBus interface type mismatch fixes for device listing
+- Enhanced error handling and logging
+- Improved daemon-applet communication stability
+
+### Previous Milestones
+
 **Q1 2025 - Major Plugin Expansion**
 - Complete plugin system implementation (20 plugins total)
 - Advanced desktop collaboration features:
@@ -1002,8 +1009,10 @@ Contributions are welcome! Please see:
 - **CI/CD Configured** with GitHub Actions
 - **Production Ready** for COSMIC Desktop
 
-Latest updates:
-- 20 plugins fully implemented and tested (8 added in Q1 2025)
+Latest updates (Q1 2026):
+- Fixed critical DBus interface type mismatch causing device listing failures
+- Enhanced daemon-applet communication stability
+- 20 plugins fully implemented and tested (8 added in 2025)
 - Per-device settings UI with RemoteDesktop configuration
 - Comprehensive plugin documentation in README
 - All integration and unit tests passing
