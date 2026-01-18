@@ -1,4 +1,4 @@
-# COSMIC Connect NixOS Module
+# COSMIC Connect NixOS Module {#cosmic-connect-nixos-module}
 
 This NixOS module provides declarative configuration for COSMIC Connect, enabling device connectivity features for COSMIC Desktop.
 
