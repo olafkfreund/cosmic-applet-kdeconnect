@@ -403,6 +403,6 @@ in {
 
   meta = {
     maintainers = with maintainers; [ ]; # Add your maintainer info
-    doc = ./module.md; # Optional: Add module documentation
+    # doc = ./module.md; # Disabled: Causes NixOS manual redirect requirements for third-party modules
   };
 }
