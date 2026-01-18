@@ -34,6 +34,16 @@ const SPACE_L: f32 = 16.0; // Large (major sections)
 const SPACE_XL: f32 = 20.0; // Extra large
 const SPACE_XXL: f32 = 24.0; // Double extra large (empty states, major padding)
 
+// Icon sizes
+const ICON_XS: u16 = 12;
+const ICON_S: u16 = 16; // Standard button/action icon
+const ICON_M: u16 = 24;
+const ICON_L: u16 = 32;
+const ICON_XL: u16 = 48; // Hero/Empty state
+                         // Specific sizes
+const ICON_14: u16 = 14; // Text-aligned small
+const ICON_28: u16 = 28; // Device row icon
+
 fn main() -> cosmic::iced::Result {
     // Initialize logging with environment variable support
     // Set RUST_LOG=debug for verbose output, defaults to info level
@@ -1482,7 +1492,7 @@ impl CConnectApplet {
                 container(
                     row![
                         cosmic::widget::text::caption("Scanning"),
-                        icon::from_name("process-working-symbolic").size(16),
+                        icon::from_name("process-working-symbolic").size(ICON_S),
                     ]
                     .spacing(SPACE_S)
                     .align_y(cosmic::iced::Alignment::Center)
@@ -1505,7 +1515,7 @@ impl CConnectApplet {
 
         let content = if self.devices.is_empty() {
             column![
-                container(icon::from_name("phone-disconnected-symbolic").size(48))
+                container(icon::from_name("phone-disconnected-symbolic").size(ICON_XL))
                     .padding(Padding::from([SPACE_S, 0.0, SPACE_M, 0.0])),
                 cosmic::widget::text::heading("No Devices Found"),
                 cosmic::widget::text::body("Make sure:"),
@@ -1634,7 +1644,7 @@ impl CConnectApplet {
 
         // Player name/label
         let player_name = row![
-            icon::from_name("multimedia-player-symbolic").size(16),
+            icon::from_name("multimedia-player-symbolic").size(ICON_S),
             cosmic::widget::text::body(selected_player),
         ]
         .spacing(SPACE_XS)
@@ -1677,25 +1687,25 @@ impl CConnectApplet {
         };
 
         let controls = row![
-            button::icon(icon::from_name("media-skip-backward-symbolic").size(16))
+            button::icon(icon::from_name("media-skip-backward-symbolic").size(ICON_S))
                 .on_press(Message::MprisControl(
                     selected_player.clone(),
                     "Previous".to_string()
                 ))
                 .padding(SPACE_XS),
-            button::icon(icon::from_name(play_icon).size(16))
+            button::icon(icon::from_name(play_icon).size(ICON_S))
                 .on_press(Message::MprisControl(
                     selected_player.clone(),
                     play_action.to_string()
                 ))
                 .padding(SPACE_XS),
-            button::icon(icon::from_name("media-playback-stop-symbolic").size(16))
+            button::icon(icon::from_name("media-playback-stop-symbolic").size(ICON_S))
                 .on_press(Message::MprisControl(
                     selected_player.clone(),
                     "Stop".to_string()
                 ))
                 .padding(SPACE_XS),
-            button::icon(icon::from_name("media-skip-forward-symbolic").size(16))
+            button::icon(icon::from_name("media-skip-forward-symbolic").size(ICON_S))
                 .on_press(Message::MprisControl(
                     selected_player.clone(),
                     "Next".to_string()
@@ -1719,7 +1729,7 @@ impl CConnectApplet {
             .align_y(cosmic::iced::Alignment::Center)
         } else {
             row![
-                container(icon::from_name("audio-x-generic-symbolic").size(32))
+                container(icon::from_name("audio-x-generic-symbolic").size(ICON_L))
                     .width(Length::Fixed(50.0))
                     .align_x(cosmic::iced::Alignment::Center),
                 metadata_col
@@ -1776,7 +1786,7 @@ impl CConnectApplet {
                 row![
                     name_status_col,
                     row![
-                        icon::from_name(battery_icon).size(14),
+                        icon::from_name(battery_icon).size(ICON_14),
                         cosmic::widget::text::caption(format!("{}%", level)),
                     ]
                     .spacing(SPACE_XXS)
@@ -1794,13 +1804,13 @@ impl CConnectApplet {
         // Main device row layout with connection quality indicator
         let mut content = column![
             row![
-                container(icon::from_name(device_icon).size(28))
+                container(icon::from_name(device_icon).size(ICON_28))
                     .width(Length::Fixed(44.0))
                     .padding(SPACE_S),
                 container(
                     column![
-                        icon::from_name(status_icon).size(14),
-                        icon::from_name(quality_icon).size(12),
+                        icon::from_name(status_icon).size(ICON_14),
+                        icon::from_name(quality_icon).size(ICON_XS),
                     ]
                     .spacing(SPACE_XXXS)
                     .align_x(Horizontal::Center)
@@ -1956,14 +1966,14 @@ impl CConnectApplet {
                     override_count,
                     if override_count == 1 { "" } else { "s" }
                 ))
-                .size(12),
+                .size(ICON_XS),
             );
         }
 
         let header = row![
             header_row,
             horizontal_space(),
-            button::icon(icon::from_name("window-close-symbolic").size(14))
+            button::icon(icon::from_name("window-close-symbolic").size(ICON_14))
                 .on_press(Message::ToggleDeviceSettings(device_id.to_string()))
                 .padding(SPACE_XXS)
         ]
@@ -1976,10 +1986,10 @@ impl CConnectApplet {
                 cosmic::widget::text_input("Nickname", &self.nickname_input)
                     .on_input(Message::UpdateNicknameInput)
                     .width(Length::Fill),
-                button::icon(icon::from_name("emblem-ok-symbolic").size(16))
+                button::icon(icon::from_name("emblem-ok-symbolic").size(ICON_S))
                     .on_press(Message::SaveNickname(device_id.to_string()))
                     .padding(SPACE_XS),
-                button::icon(icon::from_name("process-stop-symbolic").size(16))
+                button::icon(icon::from_name("process-stop-symbolic").size(ICON_S))
                     .on_press(Message::CancelRenaming)
                     .padding(SPACE_XS),
             ]
@@ -1993,9 +2003,9 @@ impl CConnectApplet {
                         .as_deref()
                         .unwrap_or(&device.info.device_name)
                 )
-                .size(14)
+                .size(ICON_14)
                 .width(Length::Fill),
-                button::icon(icon::from_name("document-edit-symbolic").size(14))
+                button::icon(icon::from_name("document-edit-symbolic").size(ICON_14))
                     .on_press(Message::StartRenaming(device_id.to_string()))
                     .padding(SPACE_XXS)
             ]
@@ -2017,7 +2027,7 @@ impl CConnectApplet {
 
             // Build plugin row
             let mut plugin_row = row![
-                icon::from_name(plugin_meta.icon).size(16),
+                icon::from_name(plugin_meta.icon).size(ICON_S),
                 cosmic::widget::text::caption(plugin_meta.name).width(Length::Fill),
             ]
             .spacing(SPACE_S)
@@ -2027,14 +2037,14 @@ impl CConnectApplet {
             if has_override {
                 plugin_row = plugin_row.push(if plugin_enabled {
                     row![
-                        icon::from_name("emblem-ok-symbolic").size(12),
+                        icon::from_name("emblem-ok-symbolic").size(ICON_XS),
                         cosmic::widget::text::caption("Override: On")
                     ]
                     .spacing(SPACE_XXS)
                     .align_y(cosmic::iced::Alignment::Center)
                 } else {
                     row![
-                        icon::from_name("emblem-important-symbolic").size(12),
+                        icon::from_name("emblem-important-symbolic").size(ICON_XS),
                         cosmic::widget::text::caption("Override: Off")
                     ]
                     .spacing(SPACE_XXS)
@@ -2065,7 +2075,7 @@ impl CConnectApplet {
             // Reset button (if override exists)
             if has_override {
                 plugin_row = plugin_row.push(
-                    button::icon(icon::from_name("view-refresh-symbolic").size(12))
+                    button::icon(icon::from_name("view-refresh-symbolic").size(ICON_XS))
                         .on_press({
                             let device_id = device_id.to_string();
                             let plugin_id = plugin_meta.id.to_string();
@@ -2075,7 +2085,7 @@ impl CConnectApplet {
                 );
             } else {
                 plugin_row = plugin_row.push(
-                    button::icon(icon::from_name("view-refresh-symbolic").size(12))
+                    button::icon(icon::from_name("view-refresh-symbolic").size(ICON_XS))
                         .padding(SPACE_XXS),
                 );
             }
@@ -2083,7 +2093,7 @@ impl CConnectApplet {
             // Settings button (only for RemoteDesktop plugin)
             if plugin_meta.id == "remotedesktop" {
                 plugin_row = plugin_row.push(
-                    button::icon(icon::from_name("emblem-system-symbolic").size(12))
+                    button::icon(icon::from_name("emblem-system-symbolic").size(ICON_XS))
                         .on_press(Message::ShowRemoteDesktopSettings(device_id.to_string()))
                         .padding(SPACE_XXS),
                 );
@@ -2135,7 +2145,7 @@ impl CConnectApplet {
         let header = row![
             cosmic::widget::text::body("Remote Desktop Settings"),
             horizontal_space(),
-            button::icon(icon::from_name("window-close-symbolic").size(14))
+            button::icon(icon::from_name("window-close-symbolic").size(ICON_14))
                 .on_press(Message::CloseRemoteDesktopSettings)
                 .padding(SPACE_XXS)
         ]
@@ -2281,7 +2291,7 @@ impl CConnectApplet {
         if let Some(error) = &self.remotedesktop_error {
             content = content.push(
                 text(error)
-                    .size(12)
+                    .size(ICON_XS)
                     .class(theme::Text::Color(Color::from_rgb(0.9, 0.2, 0.2))),
             );
         }
@@ -2304,7 +2314,7 @@ impl CConnectApplet {
         }
 
         let mut transfers_col = column![text("Active Transfers")
-            .size(14)
+            .size(ICON_14)
             .class(theme::Text::Color(Color::from_rgb(0.5, 0.5, 1.0))),]
         .spacing(SPACE_S);
 
@@ -2349,7 +2359,7 @@ fn action_button_with_tooltip(
     message: Message,
 ) -> Element<'static, Message> {
     cosmic::widget::tooltip(
-        button::icon(icon::from_name(icon_name).size(16))
+        button::icon(icon::from_name(icon_name).size(ICON_S))
             .on_press(message)
             .padding(SPACE_XS),
         tooltip_text,
@@ -2361,7 +2371,7 @@ fn action_button_with_tooltip(
 /// Creates a small icon button for device quick actions (ping, send file, etc.)
 /// @deprecated Use action_button_with_tooltip instead
 fn action_button(icon_name: &str, message: Message) -> Element<'static, Message> {
-    button::icon(icon::from_name(icon_name).size(16))
+    button::icon(icon::from_name(icon_name).size(ICON_S))
         .on_press(message)
         .padding(SPACE_XS)
         .into()
