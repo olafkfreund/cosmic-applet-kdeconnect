@@ -1443,11 +1443,7 @@ impl CConnectApplet {
                 search_input,
                 container(
                     row![
-                        cosmic::widget::text::caption("Scanning").class(
-                            cosmic::theme::Text::Color(cosmic::iced::Color::from_rgb(
-                                0.5, 0.5, 0.5
-                            ))
-                        ),
+                        cosmic::widget::text::caption("Scanning"),
                         icon::from_name("process-working-symbolic").size(16),
                     ]
                     .spacing(8)
