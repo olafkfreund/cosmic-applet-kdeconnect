@@ -142,6 +142,13 @@ const PLUGINS: &[PluginMetadata] = &[
         icon: "folder-sync-symbolic",
         capability: "cconnect.filesync",
     },
+    PluginMetadata {
+        id: "runcommand",
+        name: "Run Commands",
+        description: "Execute remote commands",
+        icon: "system-run-symbolic",
+        capability: "cconnect.runcommand",
+    },
 ];
 
 #[derive(Debug, Clone)]
@@ -203,6 +210,12 @@ struct CConnectApplet {
     add_sync_folder_id: String,
     add_sync_folder_strategy: String,
     file_sync_settings_device: Option<String>,
+    // Run Command state
+    run_commands: HashMap<String, HashMap<String, dbus_client::RunCommand>>,
+    add_run_command_device: Option<String>,
+    add_run_command_name: String,
+    add_run_command_cmd: String,
+    run_command_settings_device: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -255,7 +268,7 @@ enum Message {
     CancelRenaming,
     UpdateNicknameInput(String),
     SaveNickname(String), // device_id
-    RingDevice(String),   // device_id
+
     // Settings UI
     ToggleDeviceSettings(String),                          // device_id
     SetDevicePluginEnabled(String, String, bool),          // device_id, plugin, enabled
@@ -272,6 +285,17 @@ enum Message {
     UpdateRemoteDesktopCustomHeight(String, String), // device_id, height_str
     SaveRemoteDesktopSettings(String),          // device_id
     RemoteDesktopSettingsLoaded(String, dbus_client::RemoteDesktopSettings), // device_id, settings
+    // Run Commands
+    ShowRunCommandSettings(String), // device_id
+    CloseRunCommandSettings,
+    LoadRunCommands(String), // device_id
+    RunCommandsLoaded(String, HashMap<String, dbus_client::RunCommand>), // device_id, commands
+    StartAddRunCommand(String), // device_id
+    CancelAddRunCommand,
+    UpdateRunCommandNameInput(String),
+    UpdateRunCommandCmdInput(String),
+    AddRunCommand(String),            // device_id
+    RemoveRunCommand(String, String), // device_id, command_id
     // File Transfer events
     TransferProgress(
         String,
@@ -506,6 +530,11 @@ impl cosmic::Application for CConnectApplet {
             add_sync_folder_id: String::new(),
             add_sync_folder_strategy: "last_modified_wins".to_string(),
             file_sync_settings_device: None,
+            run_commands: HashMap::new(),
+            add_run_command_device: None,
+            add_run_command_name: String::new(),
+            add_run_command_cmd: String::new(),
+            run_command_settings_device: None,
         };
         (app, Task::none())
     }
@@ -910,16 +939,7 @@ impl cosmic::Application for CConnectApplet {
                     |_| cosmic::Action::App(Message::RefreshDevices),
                 )
             }
-            Message::RingDevice(device_id) => Task::perform(
-                async move {
-                    if let Ok((client, _)) = DbusClient::connect().await {
-                        if let Err(e) = client.find_phone(&device_id).await {
-                            tracing::error!("Failed to ring device: {}", e);
-                        }
-                    }
-                },
-                |_| cosmic::Action::None,
-            ),
+
             Message::MprisSetVolume(player, volume) => {
                 tracing::info!("MPRIS set volume: {} to {}", player, volume);
                 Task::perform(
@@ -1405,6 +1425,97 @@ impl cosmic::Application for CConnectApplet {
                 "remove_sync_folder",
                 move |client, dev_id| async move { client.remove_sync_folder(dev_id, folder_id).await },
             ),
+
+            // Run Command logic
+            Message::ShowRunCommandSettings(device_id) => {
+                self.run_command_settings_device = Some(device_id.clone());
+                // Load commands
+                let _ = self.update(Message::LoadRunCommands(device_id));
+                Task::none()
+            }
+            Message::CloseRunCommandSettings => {
+                self.run_command_settings_device = None;
+                self.add_run_command_device = None; // Also close add form
+                Task::none()
+            }
+            Message::LoadRunCommands(device_id) => match tokio::runtime::Handle::try_current() {
+                Ok(_) => {
+                    let future = async move {
+                        match DbusClient::connect().await {
+                            Ok((client, _)) => {
+                                match client.get_run_commands(device_id.clone()).await {
+                                    Ok(commands) => Some((device_id, commands)),
+                                    Err(e) => {
+                                        tracing::error!("Failed to get run commands: {}", e);
+                                        None
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to connect to dbus: {}", e);
+                                None
+                            }
+                        }
+                    };
+                    Task::perform(future, |result| {
+                        if let Some((device_id, commands)) = result {
+                            cosmic::Action::App(Message::RunCommandsLoaded(device_id, commands))
+                        } else {
+                            cosmic::Action::None
+                        }
+                    })
+                }
+                Err(_) => Task::none(),
+            },
+            Message::RunCommandsLoaded(device_id, commands) => {
+                self.run_commands.insert(device_id, commands);
+                Task::none()
+            }
+            Message::StartAddRunCommand(device_id) => {
+                self.add_run_command_device = Some(device_id);
+                self.add_run_command_name = String::new();
+                self.add_run_command_cmd = String::new();
+                Task::none()
+            }
+            Message::CancelAddRunCommand => {
+                self.add_run_command_device = None;
+                Task::none()
+            }
+            Message::UpdateRunCommandNameInput(name) => {
+                self.add_run_command_name = name;
+                Task::none()
+            }
+            Message::UpdateRunCommandCmdInput(cmd) => {
+                self.add_run_command_cmd = cmd;
+                Task::none()
+            }
+            Message::AddRunCommand(device_id) => {
+                if self.add_run_command_name.is_empty() || self.add_run_command_cmd.is_empty() {
+                    return Task::none();
+                }
+
+                let name = self.add_run_command_name.clone();
+                let command = self.add_run_command_cmd.clone();
+                // Generate a command ID (simple slug or UUID-like)
+                let command_id = name.to_lowercase().replace(" ", "_");
+
+                self.add_run_command_device = None; // Close form
+
+                device_operation_task(
+                    device_id,
+                    "add_run_command",
+                    move |client, dev_id| async move {
+                        client
+                            .add_run_command(dev_id, command_id, name, command)
+                            .await
+                    },
+                )
+            }
+            Message::RemoveRunCommand(device_id, command_id) => device_operation_task(
+                device_id,
+                "remove_run_command",
+                move |client, dev_id| async move { client.remove_run_command(dev_id, command_id).await },
+            ),
         }
     }
 
@@ -1595,6 +1706,18 @@ impl CConnectApplet {
     }
 
     fn popup_view(&self) -> Element<'_, Message> {
+        // Settings overrides
+        if let Some(device_id) = &self.remotedesktop_settings_device {
+            if let Some(settings) = self.remotedesktop_settings.get(device_id) {
+                return self.remotedesktop_settings_view(device_id, settings);
+            }
+        }
+        if let Some(device_id) = &self.file_sync_settings_device {
+            return self.file_sync_settings_view(device_id);
+        }
+        if let Some(device_id) = &self.run_command_settings_device {
+            return self.run_command_settings_view(device_id);
+        }
         let view_switcher = row![
             button::text("Devices")
                 .on_press(Message::SetViewMode(ViewMode::Devices))
@@ -2042,42 +2165,36 @@ impl CConnectApplet {
 
         // Quick actions for connected & paired devices
         if device.is_connected() && device.is_paired() {
-            actions = actions
-                .push(action_button_with_tooltip(
-                    "user-available-symbolic",
-                    "Send ping",
-                    Message::SendPing(device_id.to_string()),
-                ))
-                .push(action_button_with_tooltip(
-                    "document-send-symbolic",
-                    "Send file",
-                    Message::SendFile(device_id.to_string()),
-                ))
-                .push(action_button_with_tooltip(
-                    "insert-text-symbolic",
-                    "Share clipboard text",
-                    Message::ShareText(device_id.to_string()),
-                ));
+            actions = actions.push(action_button_with_tooltip(
+                "user-available-symbolic",
+                "Send ping",
+                Message::SendPing(device_id.to_string()),
+            ));
 
-            // Add Find My Phone if supported (or always for now as capability check might be tricky without exact string)
+            if device.has_incoming_capability("cconnect.share") {
+                actions = actions
+                    .push(action_button_with_tooltip(
+                        "document-send-symbolic",
+                        "Send file",
+                        Message::SendFile(device_id.to_string()),
+                    ))
+                    .push(action_button_with_tooltip(
+                        "insert-text-symbolic",
+                        "Share clipboard text",
+                        Message::ShareText(device_id.to_string()),
+                    ))
+                    .push(action_button_with_tooltip(
+                        "send-to-symbolic",
+                        "Share URL",
+                        Message::ShareUrl(device_id.to_string()),
+                    ));
+            }
+
+            // Add Find My Phone if supported
             if device.has_incoming_capability("cconnect.findmyphone.request") {
                 actions = actions.push(action_button_with_tooltip(
                     "find-location-symbolic",
                     "Ring device",
-                    Message::RingDevice(device_id.to_string()),
-                ));
-            }
-
-            actions = actions.push(action_button_with_tooltip(
-                "send-to-symbolic",
-                "Share URL",
-                Message::ShareUrl(device_id.to_string()),
-            ));
-
-            if matches!(device.info.device_type, DeviceType::Phone) {
-                actions = actions.push(action_button_with_tooltip(
-                    "find-location-symbolic",
-                    "Find my phone",
                     Message::FindPhone(device_id.to_string()),
                 ));
             }
@@ -2271,6 +2388,12 @@ impl CConnectApplet {
                         .on_press(Message::ShowFileSyncSettings(device_id.to_string()))
                         .padding(SPACE_XXS),
                 );
+            } else if plugin_meta.id == "runcommand" {
+                plugin_row = plugin_row.push(
+                    button::icon(icon::from_name("emblem-system-symbolic").size(ICON_XS))
+                        .on_press(Message::ShowRunCommandSettings(device_id.to_string()))
+                        .padding(SPACE_XXS),
+                );
             }
 
             // Add to list (grey out if not supported)
@@ -2441,6 +2564,120 @@ impl CConnectApplet {
             content = content.push(
                 button::text("Add Synced Folder")
                     .on_press(Message::StartAddSyncFolder(device_id.to_string()))
+                    .width(Length::Fill),
+            );
+        }
+
+        container(content)
+            .class(cosmic::theme::Container::Card)
+            .padding(SPACE_M)
+            .into()
+    }
+
+    fn run_command_settings_view(&self, device_id: &str) -> Element<'_, Message> {
+        use cosmic::iced::Alignment;
+        use cosmic::widget::{button, container, icon, text, text_input};
+
+        let mut content = column![row![
+            text::title3("Run Commands").width(Length::Fill),
+            button::icon(icon::from_name("window-close-symbolic").size(ICON_S))
+                .on_press(Message::CloseRunCommandSettings)
+                .padding(SPACE_XS)
+        ]
+        .align_y(Alignment::Center)]
+        .spacing(SPACE_M);
+
+        // List existing commands
+        if let Some(commands) = self.run_commands.get(device_id) {
+            if !commands.is_empty() {
+                let mut list = column![].spacing(SPACE_S);
+                // Sort by name
+                let mut sorted_cmds: Vec<_> = commands.into_iter().collect();
+                sorted_cmds.sort_by(|a, b| a.1.name.cmp(&b.1.name));
+
+                for (cmd_id, cmd) in sorted_cmds {
+                    let row = row![
+                        column![
+                            text::body(&cmd.name),
+                            text::caption(&cmd.command).class(cosmic::theme::Text::Color(
+                                cosmic::iced::Color::from_rgb(0.5, 0.5, 0.5),
+                            )),
+                        ]
+                        .width(Length::Fill),
+                        button::icon(icon::from_name("user-trash-symbolic").size(ICON_S))
+                            .on_press(Message::RemoveRunCommand(
+                                device_id.to_string(),
+                                cmd_id.clone()
+                            ))
+                            .padding(SPACE_XS)
+                            .class(cosmic::theme::Button::Destructive)
+                    ]
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill);
+
+                    list = list.push(
+                        container(row)
+                            .padding(SPACE_S)
+                            .class(cosmic::theme::Container::Card),
+                    );
+                }
+                content = content.push(list);
+            } else {
+                content = content.push(
+                    container(text::caption("No run commands configured"))
+                        .padding(SPACE_S)
+                        .width(Length::Fill)
+                        .align_x(Horizontal::Center),
+                );
+            }
+        } else {
+            content = content.push(
+                container(text::caption("Loading..."))
+                    .padding(SPACE_S)
+                    .width(Length::Fill)
+                    .align_x(Horizontal::Center),
+            );
+        }
+
+        content = content.push(divider::horizontal::default());
+
+        // Add New Command Form
+        if self.add_run_command_device.as_deref() == Some(device_id) {
+            let form = column![
+                text::title3("Add New Command"),
+                text_input("Name (e.g. Lock Screen)", &self.add_run_command_name)
+                    .on_input(Message::UpdateRunCommandNameInput),
+                text_input(
+                    "Command (e.g. loginctl lock-session)",
+                    &self.add_run_command_cmd
+                )
+                .on_input(Message::UpdateRunCommandCmdInput)
+                .on_submit({
+                    let id = device_id.to_string();
+                    move |_| Message::AddRunCommand(id.clone())
+                }),
+                row![
+                    button::text("Cancel")
+                        .on_press(Message::CancelAddRunCommand)
+                        .width(Length::Fill),
+                    button::text("Add Command")
+                        .on_press(Message::AddRunCommand(device_id.to_string()))
+                        .class(cosmic::theme::Button::Suggested)
+                        .width(Length::Fill),
+                ]
+                .spacing(SPACE_S)
+            ]
+            .spacing(SPACE_S);
+
+            content = content.push(
+                container(form)
+                    .padding(SPACE_S)
+                    .class(cosmic::theme::Container::Card),
+            );
+        } else {
+            content = content.push(
+                button::text("Add Command")
+                    .on_press(Message::StartAddRunCommand(device_id.to_string()))
                     .width(Length::Fill),
             );
         }

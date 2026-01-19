@@ -149,6 +149,13 @@ pub struct PlayerMetadata {
     pub length: i64, // microseconds
 }
 
+/// Run Command definition
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RunCommand {
+    pub name: String,
+    pub command: String,
+}
+
 /// Player state
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlayerState {
@@ -456,6 +463,25 @@ trait CConnect {
         total: u64,
         direction: &str,
     ) -> zbus::fdo::Result<()>;
+
+    /// Add a run command
+    async fn add_run_command(
+        &self,
+        device_id: String,
+        command_id: String,
+        name: String,
+        command: String,
+    ) -> zbus::fdo::Result<()>;
+
+    /// Remove a run command
+    async fn remove_run_command(
+        &self,
+        device_id: String,
+        command_id: String,
+    ) -> zbus::fdo::Result<()>;
+
+    /// Get run commands (returns JSON string map of id -> Command)
+    async fn get_run_commands(&self, device_id: String) -> zbus::fdo::Result<String>;
 
     /// Signal: File transfer complete
     #[zbus(signal)]
@@ -985,6 +1011,39 @@ impl DbusClient {
             .get_sync_folders(device_id)
             .await
             .context("Failed to call get_sync_folders")
+    }
+
+    /// Add a run command
+    pub async fn add_run_command(
+        &self,
+        device_id: String,
+        command_id: String,
+        name: String,
+        command: String,
+    ) -> Result<()> {
+        self.proxy
+            .add_run_command(device_id, command_id, name, command)
+            .await
+            .context("Failed to call add_run_command")
+    }
+
+    /// Remove a run command
+    pub async fn remove_run_command(&self, device_id: String, command_id: String) -> Result<()> {
+        self.proxy
+            .remove_run_command(device_id, command_id)
+            .await
+            .context("Failed to call remove_run_command")
+    }
+
+    /// Get run commands
+    pub async fn get_run_commands(&self, device_id: String) -> Result<HashMap<String, RunCommand>> {
+        let json = self
+            .proxy
+            .get_run_commands(device_id)
+            .await
+            .context("Failed to call get_run_commands")?;
+
+        serde_json::from_str(&json).context("Failed to parse run commands JSON")
     }
 }
 
