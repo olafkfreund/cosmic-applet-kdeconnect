@@ -1766,9 +1766,13 @@ impl CConnectApplet {
         } else {
             row![
                 search_input,
-                button::icon(icon::from_name("view-refresh-symbolic"))
-                    .on_press(Message::RefreshDevices)
-                    .padding(SPACE_XXS)
+                cosmic::widget::tooltip(
+                    button::icon(icon::from_name("view-refresh-symbolic"))
+                        .on_press(Message::RefreshDevices)
+                        .padding(SPACE_XXS),
+                    "Refresh devices",
+                    cosmic::widget::tooltip::Position::Bottom,
+                )
             ]
             .spacing(SPACE_S)
         };
@@ -1959,30 +1963,46 @@ impl CConnectApplet {
         };
 
         let controls = row![
-            button::icon(icon::from_name("media-skip-backward-symbolic").size(ICON_S))
-                .on_press(Message::MprisControl(
-                    selected_player.clone(),
-                    "Previous".to_string()
-                ))
-                .padding(SPACE_XS),
-            button::icon(icon::from_name(play_icon).size(ICON_S))
-                .on_press(Message::MprisControl(
-                    selected_player.clone(),
-                    play_action.to_string()
-                ))
-                .padding(SPACE_XS),
-            button::icon(icon::from_name("media-playback-stop-symbolic").size(ICON_S))
-                .on_press(Message::MprisControl(
-                    selected_player.clone(),
-                    "Stop".to_string()
-                ))
-                .padding(SPACE_XS),
-            button::icon(icon::from_name("media-skip-forward-symbolic").size(ICON_S))
-                .on_press(Message::MprisControl(
-                    selected_player.clone(),
-                    "Next".to_string()
-                ))
-                .padding(SPACE_XS),
+            cosmic::widget::tooltip(
+                button::icon(icon::from_name("media-skip-backward-symbolic").size(ICON_S))
+                    .on_press(Message::MprisControl(
+                        selected_player.clone(),
+                        "Previous".to_string(),
+                    ))
+                    .padding(SPACE_XS),
+                "Previous",
+                cosmic::widget::tooltip::Position::Bottom,
+            ),
+            cosmic::widget::tooltip(
+                button::icon(icon::from_name(play_icon).size(ICON_S))
+                    .on_press(Message::MprisControl(
+                        selected_player.clone(),
+                        play_action.to_string()
+                    ))
+                    .padding(SPACE_XS),
+                play_action,
+                cosmic::widget::tooltip::Position::Bottom,
+            ),
+            cosmic::widget::tooltip(
+                button::icon(icon::from_name("media-playback-stop-symbolic").size(ICON_S))
+                    .on_press(Message::MprisControl(
+                        selected_player.clone(),
+                        "Stop".to_string(),
+                    ))
+                    .padding(SPACE_XS),
+                "Stop",
+                cosmic::widget::tooltip::Position::Bottom,
+            ),
+            cosmic::widget::tooltip(
+                button::icon(icon::from_name("media-skip-forward-symbolic").size(ICON_S))
+                    .on_press(Message::MprisControl(
+                        selected_player.clone(),
+                        "Next".to_string(),
+                    ))
+                    .padding(SPACE_XS),
+                "Next",
+                cosmic::widget::tooltip::Position::Bottom,
+            ),
         ]
         .spacing(SPACE_XXS)
         .align_y(cosmic::iced::Alignment::Center);
@@ -2258,9 +2278,13 @@ impl CConnectApplet {
         let header = row![
             header_row,
             horizontal_space(),
-            button::icon(icon::from_name("window-close-symbolic").size(ICON_14))
-                .on_press(Message::ToggleDeviceSettings(device_id.to_string()))
-                .padding(SPACE_XXS)
+            cosmic::widget::tooltip(
+                button::icon(icon::from_name("window-close-symbolic").size(ICON_14))
+                    .on_press(Message::ToggleDeviceSettings(device_id.to_string()))
+                    .padding(SPACE_XXS),
+                "Close settings",
+                cosmic::widget::tooltip::Position::Bottom,
+            )
         ]
         .width(Length::Fill)
         .align_y(cosmic::iced::Alignment::Center);
@@ -2271,12 +2295,20 @@ impl CConnectApplet {
                 cosmic::widget::text_input("Nickname", &self.nickname_input)
                     .on_input(Message::UpdateNicknameInput)
                     .width(Length::Fill),
-                button::icon(icon::from_name("emblem-ok-symbolic").size(ICON_S))
-                    .on_press(Message::SaveNickname(device_id.to_string()))
-                    .padding(SPACE_XS),
-                button::icon(icon::from_name("process-stop-symbolic").size(ICON_S))
-                    .on_press(Message::CancelRenaming)
-                    .padding(SPACE_XS),
+                cosmic::widget::tooltip(
+                    button::icon(icon::from_name("emblem-ok-symbolic").size(ICON_S))
+                        .on_press(Message::SaveNickname(device_id.to_string()))
+                        .padding(SPACE_XS),
+                    "Save nickname",
+                    cosmic::widget::tooltip::Position::Bottom,
+                ),
+                cosmic::widget::tooltip(
+                    button::icon(icon::from_name("process-stop-symbolic").size(ICON_S))
+                        .on_press(Message::CancelRenaming)
+                        .padding(SPACE_XS),
+                    "Cancel renaming",
+                    cosmic::widget::tooltip::Position::Bottom,
+                ),
             ]
             .spacing(SPACE_S)
             .align_y(cosmic::iced::Alignment::Center)
@@ -2290,9 +2322,13 @@ impl CConnectApplet {
                 )
                 .size(ICON_14)
                 .width(Length::Fill),
-                button::icon(icon::from_name("document-edit-symbolic").size(ICON_14))
-                    .on_press(Message::StartRenaming(device_id.to_string()))
-                    .padding(SPACE_XXS)
+                cosmic::widget::tooltip(
+                    button::icon(icon::from_name("document-edit-symbolic").size(ICON_14))
+                        .on_press(Message::StartRenaming(device_id.to_string()))
+                        .padding(SPACE_XXS),
+                    "Edit nickname",
+                    cosmic::widget::tooltip::Position::Bottom,
+                )
             ]
             .spacing(SPACE_S)
             .align_y(cosmic::iced::Alignment::Center)
@@ -2359,7 +2395,7 @@ impl CConnectApplet {
 
             // Reset button (if override exists)
             if has_override {
-                plugin_row = plugin_row.push(
+                plugin_row = plugin_row.push(cosmic::widget::tooltip(
                     button::icon(icon::from_name("view-refresh-symbolic").size(ICON_XS))
                         .on_press({
                             let device_id = device_id.to_string();
@@ -2367,7 +2403,9 @@ impl CConnectApplet {
                             Message::ClearDevicePluginOverride(device_id, plugin_id)
                         })
                         .padding(SPACE_XXS),
-                );
+                    "Reset override",
+                    cosmic::widget::tooltip::Position::Bottom,
+                ));
             } else {
                 plugin_row = plugin_row.push(
                     button::icon(icon::from_name("view-refresh-symbolic").size(ICON_XS))
@@ -2377,23 +2415,29 @@ impl CConnectApplet {
 
             // Settings button (only for RemoteDesktop and FileSync plugin)
             if plugin_meta.id == "remotedesktop" {
-                plugin_row = plugin_row.push(
+                plugin_row = plugin_row.push(cosmic::widget::tooltip(
                     button::icon(icon::from_name("emblem-system-symbolic").size(ICON_XS))
                         .on_press(Message::ShowRemoteDesktopSettings(device_id.to_string()))
                         .padding(SPACE_XXS),
-                );
+                    "Configure Remote Input",
+                    cosmic::widget::tooltip::Position::Bottom,
+                ));
             } else if plugin_meta.id == "filesync" {
-                plugin_row = plugin_row.push(
+                plugin_row = plugin_row.push(cosmic::widget::tooltip(
                     button::icon(icon::from_name("emblem-system-symbolic").size(ICON_XS))
                         .on_press(Message::ShowFileSyncSettings(device_id.to_string()))
                         .padding(SPACE_XXS),
-                );
+                    "Configure File Sync",
+                    cosmic::widget::tooltip::Position::Bottom,
+                ));
             } else if plugin_meta.id == "runcommand" {
-                plugin_row = plugin_row.push(
+                plugin_row = plugin_row.push(cosmic::widget::tooltip(
                     button::icon(icon::from_name("emblem-system-symbolic").size(ICON_XS))
                         .on_press(Message::ShowRunCommandSettings(device_id.to_string()))
                         .padding(SPACE_XXS),
-                );
+                    "Configure Run Commands",
+                    cosmic::widget::tooltip::Position::Bottom,
+                ));
             }
 
             // Add to list (grey out if not supported)
@@ -2438,9 +2482,13 @@ impl CConnectApplet {
         let header = row![
             cosmic::widget::text::body("File Sync Settings"),
             horizontal_space(),
-            button::icon(icon::from_name("window-close-symbolic").size(ICON_14))
-                .on_press(Message::CloseFileSyncSettings)
-                .padding(SPACE_XXS)
+            cosmic::widget::tooltip(
+                button::icon(icon::from_name("window-close-symbolic").size(ICON_14))
+                    .on_press(Message::CloseFileSyncSettings)
+                    .padding(SPACE_XXS),
+                "Close settings",
+                cosmic::widget::tooltip::Position::Bottom,
+            )
         ]
         .width(Length::Fill)
         .align_y(cosmic::iced::Alignment::Center);
@@ -2467,12 +2515,16 @@ impl CConnectApplet {
                         ]
                         .spacing(SPACE_XXS),
                         horizontal_space(),
-                        button::icon(icon::from_name("user-trash-symbolic").size(ICON_S))
-                            .on_press(Message::RemoveSyncFolder(
-                                device_id.to_string(),
-                                folder.folder_id.clone()
-                            ))
-                            .padding(SPACE_XS)
+                        cosmic::widget::tooltip(
+                            button::icon(icon::from_name("user-trash-symbolic").size(ICON_S))
+                                .on_press(Message::RemoveSyncFolder(
+                                    device_id.to_string(),
+                                    folder.folder_id.clone(),
+                                ))
+                                .padding(SPACE_XS),
+                            "Remove sync folder",
+                            cosmic::widget::tooltip::Position::Bottom,
+                        )
                     ]
                     .align_y(cosmic::iced::Alignment::Center)
                     .width(Length::Fill);
@@ -2580,9 +2632,13 @@ impl CConnectApplet {
 
         let mut content = column![row![
             text::title3("Run Commands").width(Length::Fill),
-            button::icon(icon::from_name("window-close-symbolic").size(ICON_S))
-                .on_press(Message::CloseRunCommandSettings)
-                .padding(SPACE_XS)
+            cosmic::widget::tooltip(
+                button::icon(icon::from_name("window-close-symbolic").size(ICON_S))
+                    .on_press(Message::CloseRunCommandSettings)
+                    .padding(SPACE_XS),
+                "Close settings",
+                cosmic::widget::tooltip::Position::Bottom,
+            )
         ]
         .align_y(Alignment::Center)]
         .spacing(SPACE_M);
@@ -2604,13 +2660,17 @@ impl CConnectApplet {
                             )),
                         ]
                         .width(Length::Fill),
-                        button::icon(icon::from_name("user-trash-symbolic").size(ICON_S))
-                            .on_press(Message::RemoveRunCommand(
-                                device_id.to_string(),
-                                cmd_id.clone()
-                            ))
-                            .padding(SPACE_XS)
-                            .class(cosmic::theme::Button::Destructive)
+                        cosmic::widget::tooltip(
+                            button::icon(icon::from_name("user-trash-symbolic").size(ICON_S))
+                                .on_press(Message::RemoveRunCommand(
+                                    device_id.to_string(),
+                                    cmd_id.clone(),
+                                ))
+                                .padding(SPACE_XS)
+                                .class(cosmic::theme::Button::Destructive),
+                            "Remove command",
+                            cosmic::widget::tooltip::Position::Bottom,
+                        )
                     ]
                     .align_y(Alignment::Center)
                     .width(Length::Fill);
@@ -2700,9 +2760,13 @@ impl CConnectApplet {
         let header = row![
             cosmic::widget::text::body("Remote Desktop Settings"),
             horizontal_space(),
-            button::icon(icon::from_name("window-close-symbolic").size(ICON_14))
-                .on_press(Message::CloseRemoteDesktopSettings)
-                .padding(SPACE_XXS)
+            cosmic::widget::tooltip(
+                button::icon(icon::from_name("window-close-symbolic").size(ICON_14))
+                    .on_press(Message::CloseRemoteDesktopSettings)
+                    .padding(SPACE_XXS),
+                "Close settings",
+                cosmic::widget::tooltip::Position::Bottom,
+            )
         ]
         .width(Length::Fill)
         .align_y(cosmic::iced::Alignment::Center);
