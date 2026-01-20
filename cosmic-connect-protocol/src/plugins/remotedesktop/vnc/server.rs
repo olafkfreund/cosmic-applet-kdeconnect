@@ -289,7 +289,7 @@ impl VncServer {
         info!("Entering protocol loop");
 
         // Client encodings (supported by client)
-        let mut client_encodings: Vec<RfbEncoding> = Vec::new();
+        let mut _client_encodings: Vec<RfbEncoding> = Vec::new();
 
         // Set stream to non-blocking for frame updates
         stream.set_nonblocking(true).ok();
@@ -307,7 +307,7 @@ impl VncServer {
                                 self.handle_set_pixel_format(stream)?;
                             }
                             ClientMessage::SetEncodings => {
-                                client_encodings = self.handle_set_encodings(stream)?;
+                                _client_encodings = self.handle_set_encodings(stream)?;
                             }
                             ClientMessage::FramebufferUpdateRequest => {
                                 let req = FramebufferUpdateRequest::from_reader(stream)?;

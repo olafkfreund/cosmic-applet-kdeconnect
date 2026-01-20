@@ -7,7 +7,7 @@
 //! - Hextile: VNC standard tile-based encoding (TODO: Phase 4)
 
 use crate::plugins::remotedesktop::capture::{
-    EncodedFrame, EncodingType, PixelFormat, QualityPreset, RawFrame,
+    EncodedFrame, EncodingType, QualityPreset, RawFrame,
 };
 use crate::Result;
 use std::time::Instant;
@@ -226,6 +226,7 @@ impl EncoderStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugins::remotedesktop::capture::PixelFormat;
 
     fn create_test_frame() -> RawFrame {
         let width = 640;

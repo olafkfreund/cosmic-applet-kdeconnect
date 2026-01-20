@@ -31,6 +31,7 @@ pub mod frame;
 pub use frame::{EncodedFrame, EncodingType, PixelFormat, QualityPreset, RawFrame};
 
 use crate::Result;
+#[cfg(feature = "remotedesktop")]
 use tracing::{debug, info, warn};
 
 /// Monitor information

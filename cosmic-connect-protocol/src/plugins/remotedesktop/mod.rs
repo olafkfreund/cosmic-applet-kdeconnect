@@ -95,7 +95,9 @@ use crate::{Device, Packet, Result};
 use async_trait::async_trait;
 use serde_json::json;
 use std::any::Any;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
+#[cfg(feature = "remotedesktop")]
+use tracing::error;
 
 use super::{Plugin, PluginFactory};
 
@@ -291,6 +293,7 @@ impl RemoteDesktopPlugin {
 
         #[cfg(not(feature = "remotedesktop"))]
         {
+            let _ = packet;
             warn!("RemoteDesktop feature not enabled");
             let _response = Packet::new(
                 "cconnect.remotedesktop.response",

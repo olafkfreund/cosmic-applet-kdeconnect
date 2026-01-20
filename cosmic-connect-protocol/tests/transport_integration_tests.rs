@@ -7,8 +7,7 @@
 //! - MTU limit handling
 
 use cosmic_connect_protocol::transport::{
-    LatencyCategory, Transport, TransportAddress, TransportCapabilities, TransportFactory,
-    TransportType,
+    LatencyCategory, Transport, TransportAddress, TransportCapabilities, TransportType,
 };
 use cosmic_connect_protocol::{Packet, ProtocolError, Result};
 use serde_json::json;
