@@ -56,13 +56,15 @@
 //! TODO: Adaptive bitrate control
 //! TODO: Multiple viewer management
 
+pub mod decoder;
+
 use crate::plugins::{Plugin, PluginFactory};
 use crate::{Device, Packet, ProtocolError, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashSet;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 const PLUGIN_NAME: &str = "screenshare";
 const INCOMING_CAPABILITY: &str = "cconnect.screenshare";
@@ -418,6 +420,9 @@ pub struct ScreenSharePlugin {
 
     /// Receiving session (viewing remote share)
     receiving: bool,
+
+    /// Video decoder for receiving streams
+    decoder: Option<decoder::VideoDecoder>,
 }
 
 impl ScreenSharePlugin {
@@ -428,6 +433,7 @@ impl ScreenSharePlugin {
             enabled: false,
             active_session: None,
             receiving: false,
+            decoder: None,
         }
     }
 
@@ -631,7 +637,21 @@ impl Plugin for ScreenSharePlugin {
 
                 self.receiving = true;
 
-                // TODO: Initialize video decoder
+                // Initialize video decoder
+                match decoder::VideoDecoder::new() {
+                    Ok(dec) => {
+                        if let Err(e) = dec.start() {
+                            error!("Failed to start video decoder: {}", e);
+                        } else {
+                            info!("Video decoder started");
+                            self.decoder = Some(dec);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to initialize video decoder: {}", e);
+                    }
+                }
+
                 // TODO: Setup display window
             }
 
@@ -675,8 +695,13 @@ impl Plugin for ScreenSharePlugin {
 
                 self.receiving = false;
 
+                if let Some(decoder) = self.decoder.take() {
+                    if let Err(e) = decoder.stop() {
+                        warn!("Failed to stop decoder: {}", e);
+                    }
+                }
+
                 // TODO: Close display window
-                // TODO: Cleanup decoder
             }
 
             _ => {
