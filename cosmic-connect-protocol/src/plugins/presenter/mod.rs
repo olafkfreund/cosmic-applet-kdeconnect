@@ -38,7 +38,7 @@ use async_trait::async_trait;
 use laser_pointer::LaserPointer;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use super::{Plugin, PluginFactory};
 

@@ -1642,6 +1642,14 @@ impl Daemon {
                                             {
                                                 warn!("Failed to send messaging notification: {}", e);
                                             }
+
+                                            // Emit D-Bus signal for cosmic-messages
+                                            if let Some(dbus) = &dbus_server {
+                                                let conv_id = packet.body.get("conversationId").and_then(|v| v.as_str()).unwrap_or("");
+                                                if let Err(e) = dbus.emit_messaging_notification(app_name, title, text, conv_id).await {
+                                                    warn!("Failed to emit messaging D-Bus signal: {}", e);
+                                                }
+                                            }
                                         } else {
                                             if let Err(e) = notifier
                                                 .notify_from_device(&device_name, app_name, title, text)

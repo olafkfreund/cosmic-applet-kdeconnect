@@ -2303,6 +2303,18 @@ impl CConnectInterface {
     /// # Arguments
     /// * `device_id` - The device ID
     /// * `status` - Status: "paired", "rejected", or "failed"
+    /// Signal: Messaging notification received
+    ///
+    /// Emitted when a messaging app notification arrives.
+    #[zbus(signal)]
+    async fn messaging_notification(
+        signal_emitter: &SignalEmitter<'_>,
+        messenger: &str,
+        sender: &str,
+        message: &str,
+        conversation_id: &str,
+    ) -> zbus::Result<()>;
+
     #[zbus(signal)]
     async fn pairing_status_changed(
         signal_emitter: &SignalEmitter<'_>,
@@ -2527,6 +2539,32 @@ impl DbusServer {
         CConnectInterface::pairing_request(iface_ref.signal_emitter(), device_id).await?;
 
         debug!("Emitted PairingRequest signal for {}", device_id);
+        Ok(())
+    }
+
+    /// Emit a messaging_notification signal
+    pub async fn emit_messaging_notification(
+        &self,
+        messenger: &str,
+        sender: &str,
+        message: &str,
+        conversation_id: &str,
+    ) -> Result<()> {
+        let object_server = self.connection.object_server();
+        let iface_ref = object_server
+            .interface::<_, CConnectInterface>(OBJECT_PATH)
+            .await?;
+
+        CConnectInterface::messaging_notification(
+            iface_ref.signal_emitter(),
+            messenger,
+            sender,
+            message,
+            conversation_id,
+        )
+        .await?;
+
+        debug!("Emitted MessagingNotification signal for {}", messenger);
         Ok(())
     }
 

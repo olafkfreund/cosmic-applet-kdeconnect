@@ -31,6 +31,8 @@
   gdk-pixbuf,
   atk,
   pipewire,
+  webkit2gtk,
+  gobject-introspection,
   stdenv,
 }:
 
@@ -97,6 +99,8 @@ rustPlatform.buildRustPackage rec {
     gdk-pixbuf
     atk
     pipewire # RemoteDesktop plugin dependency
+    webkit2gtk
+    gobject-introspection
   ];
 
   # Build all workspace members with RemoteDesktop feature
@@ -159,6 +163,18 @@ rustPlatform.buildRustPackage rec {
     Name=com.system76.CosmicConnect
     Exec=$out/bin/cosmic-connect-daemon
     SystemdService=cosmic-connect-daemon.service
+    EOF
+
+    # Install desktop entry for cosmic-messages
+    cat > $out/share/applications/org.cosmicde.Messages.desktop << EOF
+    [Desktop Entry]
+    Type=Application
+    Name=Cosmic Messages
+    Comment=Web-based messaging for COSMIC
+    Icon=mail-message-new-symbolic
+    Exec=$out/bin/cosmic-messages
+    Categories=Network;Chat;
+    NoDisplay=false
     EOF
 
     # Install desktop entry for applet

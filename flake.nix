@@ -52,6 +52,11 @@
           libpulseaudio
           expat
 
+          # Messaging popup dependencies
+          webkit2gtk
+          glib
+          gobject-introspection
+
           # RemoteDesktop plugin dependencies
           pipewire
         ];

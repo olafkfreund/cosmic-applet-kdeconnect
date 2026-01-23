@@ -30,7 +30,7 @@ use crate::{Device, Packet, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
-use tracing::{debug, info, warn};
+use tracing::info;
 
 use super::{Plugin, PluginFactory};
 

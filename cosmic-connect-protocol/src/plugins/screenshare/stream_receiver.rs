@@ -10,9 +10,10 @@ use tracing::info;
 // Magic header "CSMR" (Cosmic Screen Mirroring)
 const MAGIC_HEADER: &[u8; 4] = b"CSMR";
 
-// Frame types
-const FRAME_TYPE_IFRAME: u8 = 0x01;
-const FRAME_TYPE_PFRAME: u8 = 0x02;
+#[cfg(feature = "remotedesktop")]
+const HEADER_SIZE: usize = 12;
+#[cfg(feature = "remotedesktop")]
+const MAX_FRAME_SIZE: usize = 10 * 1024 * 1024; // 10MB sanity limit
 
 /// Stream receiver that handles the TCP connection and parses frames
 pub struct StreamReceiver {

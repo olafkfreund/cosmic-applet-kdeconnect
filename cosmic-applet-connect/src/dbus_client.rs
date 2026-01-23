@@ -1062,6 +1062,7 @@ impl DbusClient {
     }
 
     /// Start screen share
+    #[allow(dead_code)]
     pub async fn start_screen_share(&self, device_id: &str, port: u16) -> Result<()> {
         self.proxy
             .start_screen_share(device_id, port)
@@ -1070,6 +1071,7 @@ impl DbusClient {
     }
 
     /// Send screen mirror input
+    #[allow(dead_code)]
     pub async fn send_mirror_input(&self, device_id: String, x: f32, y: f32, action: String) -> Result<()> {
         self.proxy
             .send_mirror_input(device_id, x, y, action)

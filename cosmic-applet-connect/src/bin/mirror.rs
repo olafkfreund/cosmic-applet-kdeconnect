@@ -190,7 +190,7 @@ impl cosmic::Application for MirrorApp {
         }
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<'_, Message> {
         if let Some(handle) = &self.frame {
             container(
                 image::viewer(handle.clone())

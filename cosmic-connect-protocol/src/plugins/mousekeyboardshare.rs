@@ -62,7 +62,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashMap;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 const PLUGIN_NAME: &str = "mousekeyboardshare";
 const INCOMING_CAPABILITY: &str = "cconnect.mkshare";
