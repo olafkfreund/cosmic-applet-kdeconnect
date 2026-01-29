@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tokio::runtime::Handle;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 use zbus::object_server::SignalEmitter;
@@ -196,6 +197,8 @@ pub struct CConnectInterface {
     config: Arc<RwLock<crate::config::Config>>,
     /// Transfer manager for tracking and cancelling file transfers
     transfer_manager: Arc<TransferManager>,
+    /// Tokio runtime handle for spawning async tasks from zbus executor
+    tokio_handle: Handle,
 }
 
 impl CConnectInterface {
@@ -211,6 +214,7 @@ impl CConnectInterface {
         dbus_connection: Connection,
         metrics: Option<Arc<RwLock<crate::diagnostics::Metrics>>>,
         config: Arc<RwLock<crate::config::Config>>,
+        tokio_handle: Handle,
     ) -> Self {
         Self {
             device_manager,
@@ -224,6 +228,7 @@ impl CConnectInterface {
             metrics,
             config,
             transfer_manager: Arc::new(TransferManager::new()),
+            tokio_handle,
         }
     }
 
@@ -322,9 +327,13 @@ impl CConnectInterface {
         info!("DBus: PairDevice called for {}", device_id);
 
         // Check if pairing service is available
-        let pairing_service = self.pairing_service.as_ref().ok_or_else(|| {
-            zbus::fdo::Error::Failed("Pairing service not initialized".to_string())
-        })?;
+        let pairing_service = self
+            .pairing_service
+            .as_ref()
+            .ok_or_else(|| {
+                zbus::fdo::Error::Failed("Pairing service not initialized".to_string())
+            })?
+            .clone();
 
         // Get device info from device manager
         let device_manager = self.device_manager.read().await;
@@ -341,21 +350,29 @@ impl CConnectInterface {
         }
 
         let device_info = device.info.clone();
-        let remote_addr = format!(
+        let remote_addr: std::net::SocketAddr = format!(
             "{}:{}",
             device.host.as_deref().unwrap_or("0.0.0.0"),
-            device.port.unwrap_or(1716)
+            device.port.unwrap_or(1816)
         )
         .parse()
         .map_err(|e| zbus::fdo::Error::Failed(format!("Invalid remote address: {}", e)))?;
 
         drop(device_manager);
 
-        // Request pairing
-        let pairing_service = pairing_service.read().await;
-        pairing_service
-            .request_pairing(device_info, remote_addr)
+        // Spawn the pairing request on the Tokio runtime
+        // This is needed because zbus uses its own executor that isn't Tokio
+        let device_id_clone = device_id.clone();
+        let result = self
+            .tokio_handle
+            .spawn(async move {
+                let pairing_service = pairing_service.read().await;
+                pairing_service
+                    .request_pairing(device_info, remote_addr)
+                    .await
+            })
             .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Tokio task failed: {}", e)))?
             .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to request pairing: {}", e)))?;
 
         info!("Pairing request sent to device {}", device_id);
@@ -591,6 +608,7 @@ impl CConnectInterface {
             device_id, path
         );
 
+        // Validate device exists and is connected
         let device_manager = self.device_manager.read().await;
         let device = device_manager
             .get_device(&device_id)
@@ -602,42 +620,13 @@ impl CConnectInterface {
 
         drop(device_manager);
 
-        // Extract file metadata
-        use cosmic_connect_protocol::{FileTransferInfo, PayloadServer};
-        let file_info = FileTransferInfo::from_path(&path).await.map_err(|e| {
-            zbus::fdo::Error::Failed(format!("Failed to read file metadata: {}", e))
-        })?;
-
-        info!(
-            "DBus: Sharing file '{}' ({} bytes) to {}",
-            file_info.filename, file_info.size, device_id
-        );
-
-        // Create payload server on available port
-        let server = PayloadServer::new().await.map_err(|e| {
-            zbus::fdo::Error::Failed(format!("Failed to create payload server: {}", e))
-        })?;
-        let port = server.port();
-
-        info!("DBus: Payload server listening on port {}", port);
-
-        // Create share packet with file info and payload transfer port
-        use cosmic_connect_protocol::plugins::share::{FileShareInfo, SharePlugin};
-        let share_info: FileShareInfo = file_info.clone().into();
-        let plugin = SharePlugin::new();
-        let packet = plugin.create_file_packet(share_info, port);
-
-        // Send packet via ConnectionManager
-        let conn_manager = self.connection_manager.read().await;
-        conn_manager
-            .send_packet(&device_id, &packet)
-            .await
-            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to send share packet: {}", e)))?;
-
-        info!(
-            "DBus: Share packet sent to {}, waiting for connection",
-            device_id
-        );
+        // Validate file exists (using std::fs which doesn't require tokio runtime)
+        if !std::path::Path::new(&path).exists() {
+            return Err(zbus::fdo::Error::Failed(format!(
+                "File not found: {}",
+                path
+            )));
+        }
 
         // Generate unique transfer ID
         let timestamp_millis = std::time::SystemTime::now()
@@ -652,21 +641,81 @@ impl CConnectInterface {
             .register_transfer(transfer_id.clone())
             .await;
 
-        // Spawn background task to handle file transfer with progress tracking
+        // Clone all needed values for the spawned task
         let file_path = path.clone();
         let device_id_clone = device_id.clone();
-        let filename = file_info.filename.clone();
         let transfer_id_clone = transfer_id.clone();
         let dbus_conn = self.dbus_connection.clone();
         let transfer_manager = self.transfer_manager.clone();
+        let conn_manager = self.connection_manager.clone();
+        let tokio_handle = self.tokio_handle.clone();
 
-        tokio::spawn(async move {
+        // Spawn the entire file transfer operation on tokio runtime
+        // This ensures all tokio operations have access to the runtime
+        // We use self.tokio_handle.spawn() because the zbus executor doesn't have a tokio runtime context
+        self.tokio_handle.spawn(async move {
+            use cosmic_connect_protocol::{FileTransferInfo, TlsPayloadServer};
+            use cosmic_connect_protocol::plugins::share::{FileShareInfo, SharePlugin};
+
+            // Extract file metadata (inside tokio runtime)
+            let file_info = match FileTransferInfo::from_path(&file_path).await {
+                Ok(info) => info,
+                Err(e) => {
+                    warn!("Failed to read file metadata: {}", e);
+                    return;
+                }
+            };
+
+            info!(
+                "DBus: Sharing file '{}' ({} bytes) to {}",
+                file_info.filename, file_info.size, device_id_clone
+            );
+
+            // Get TLS config from connection manager
+            let tls_config = {
+                let conn_mgr = conn_manager.read().await;
+                conn_mgr.tls_config()
+            };
+
+            // Create TLS payload server on available port (inside tokio runtime)
+            let server = match TlsPayloadServer::new(tls_config).await {
+                Ok(s) => s,
+                Err(e) => {
+                    warn!("Failed to create TLS payload server: {}", e);
+                    return;
+                }
+            };
+            let port = server.port();
+
+            info!("DBus: TLS Payload server listening on port {}", port);
+
+            // Create share packet with file info and payload transfer port
+            let share_info: FileShareInfo = file_info.clone().into();
+            let plugin = SharePlugin::new();
+            let packet = plugin.create_file_packet(share_info, port);
+
+            // Send packet via ConnectionManager
+            let conn_mgr = conn_manager.read().await;
+            if let Err(e) = conn_mgr.send_packet(&device_id_clone, &packet).await {
+                warn!("Failed to send share packet: {}", e);
+                return;
+            }
+            drop(conn_mgr);
+
+            info!(
+                "DBus: Share packet sent to {}, waiting for connection",
+                device_id_clone
+            );
+
+            let filename = file_info.filename.clone();
+
             // Create progress callback that emits DBus signals
             let conn = dbus_conn.clone();
             let tid = transfer_id_clone.clone();
             let did = device_id_clone.clone();
             let fname = filename.clone();
             let cancel_flag_inner = cancel_flag.clone();
+            let handle_inner = tokio_handle.clone();
 
             let progress_callback =
                 Box::new(move |bytes_transferred: u64, total_bytes: u64| -> bool {
@@ -682,7 +731,8 @@ impl CConnectInterface {
                     let fname_clone = fname.clone();
 
                     // Emit progress signal (non-blocking)
-                    tokio::spawn(async move {
+                    // Use the handle to spawn since we may be called from a non-tokio context
+                    handle_inner.spawn(async move {
                         if let Ok(object_server) = conn_clone
                             .object_server()
                             .interface::<_, CConnectInterface>(OBJECT_PATH)
@@ -2445,6 +2495,7 @@ impl DbusServer {
             .context("Failed to build DBus connection")?;
 
         // Create interface with connection reference
+        // We pass the current Tokio handle so that zbus handlers can spawn tasks on the tokio runtime
         let interface = CConnectInterface::new(
             device_manager,
             plugin_manager,
@@ -2456,6 +2507,7 @@ impl DbusServer {
             connection.clone(),
             metrics,
             config,
+            Handle::current(),
         );
 
         // Serve the interface BEFORE requesting the name

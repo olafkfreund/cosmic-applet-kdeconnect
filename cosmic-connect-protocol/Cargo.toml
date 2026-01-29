@@ -32,6 +32,8 @@ openssl = "0.10"
 pem = "3.0"
 
 # TLS for payload transfers (file sharing)
+# Using rustls 0.22 with ring provider for Android cross-compilation compatibility
+rustls = "0.22"
 tokio-rustls = "0.25"
 
 # System monitoring (Linux)

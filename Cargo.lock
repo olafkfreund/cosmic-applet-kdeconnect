@@ -1645,7 +1645,7 @@ dependencies = [
 [[package]]
 name = "cosmic-connect-core"
 version = "0.1.0"
-source = "git+https://github.com/olafkfreund/cosmic-connect-core.git?branch=main#473e0f3e422b575d0e828914566a1defe4ee4117"
+source = "git+https://github.com/olafkfreund/cosmic-connect-core.git?branch=main#e9f441e0243f9051839b2d2abb734c4c45a35247"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1723,6 +1723,7 @@ dependencies = [
  "pem",
  "pipewire",
  "rusqlite",
+ "rustls",
  "serde",
  "serde_json",
  "sha2",

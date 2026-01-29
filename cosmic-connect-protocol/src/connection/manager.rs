@@ -161,6 +161,11 @@ impl ConnectionManager {
         self.device_info = Arc::new(device_info);
     }
 
+    /// Get the TLS configuration for payload transfers
+    pub fn tls_config(&self) -> Arc<TlsConfig> {
+        Arc::clone(&self.tls_config)
+    }
+
     /// Get a receiver for connection events
     pub async fn subscribe(&self) -> mpsc::UnboundedReceiver<ConnectionEvent> {
         let (tx, rx) = mpsc::unbounded_channel();
@@ -264,7 +269,11 @@ impl ConnectionManager {
 
         // Connect with TLS (rustls with TOFU)
         // Note: cosmic-connect-core TLS uses TOFU - no pre-verification needed
-        let mut connection = TlsConnection::connect(addr, &self.tls_config).await?;
+        // Create identity packet to send before TLS handshake (KDE Connect protocol v8)
+        let identity_packet = self.device_info.to_identity_packet();
+        let identity_bytes = identity_packet.to_bytes()?;
+        let mut connection =
+            TlsConnection::connect(addr, &self.tls_config, &identity_bytes).await?;
 
         connection.set_device_id(device_id.to_string());
 
@@ -307,7 +316,11 @@ impl ConnectionManager {
         // Connect with TLS (rustls with TOFU)
         // Note: peer_cert is ignored - cosmic-connect-core uses TOFU model
         // Certificate verification happens at application layer via SHA256 fingerprint
-        let mut connection = TlsConnection::connect(addr, &self.tls_config).await?;
+        // Create identity packet to send before TLS handshake (KDE Connect protocol v8)
+        let identity_packet = self.device_info.to_identity_packet();
+        let identity_bytes = identity_packet.to_bytes()?;
+        let mut connection =
+            TlsConnection::connect(addr, &self.tls_config, &identity_bytes).await?;
 
         connection.set_device_id(device_id.to_string());
 

@@ -68,7 +68,7 @@ use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{timeout, Duration};
-use tokio_rustls::TlsAcceptor;
+use tokio_rustls::{TlsAcceptor, TlsConnector};
 use tracing::{debug, error, info, warn};
 
 /// Default timeout for TCP connections (30 seconds)
@@ -808,6 +808,225 @@ impl TlsPayloadClient {
         }
 
         result
+    }
+}
+
+/// TLS-enabled TCP server for sending file payloads
+///
+/// Listens on an available port and accepts a single connection with TLS encryption.
+/// Uses KDE Connect's inverted TLS roles: TCP acceptor acts as TLS CLIENT.
+///
+/// ## Security
+///
+/// - Uses TLS 1.2+ with mutual certificate authentication
+/// - Trust-On-First-Use (TOFU) model - certificates are verified at application layer
+/// - Same certificate used for main connection and payload transfers
+///
+/// ## Example
+///
+/// ```rust,ignore
+/// use cosmic_connect_protocol::payload::TlsPayloadServer;
+///
+/// // Create TLS payload server
+/// let server = TlsPayloadServer::new(&tls_config).await?;
+/// let port = server.port();
+///
+/// // Send share packet with port info
+/// // ... then accept connection and transfer file ...
+/// server.send_file("/path/to/file.pdf").await?;
+/// ```
+pub struct TlsPayloadServer {
+    listener: TcpListener,
+    port: u16,
+    tls_config: std::sync::Arc<TlsConfig>,
+    progress_callback: Option<ProgressCallback>,
+}
+
+impl TlsPayloadServer {
+    /// Create a new TLS payload server on an available port
+    ///
+    /// Binds to 0.0.0.0 in the CConnect port range (1739-1764).
+    ///
+    /// # Parameters
+    ///
+    /// - `tls_config`: TLS configuration with our certificate
+    ///
+    /// # Errors
+    ///
+    /// Returns error if no ports are available in the range.
+    pub async fn new(tls_config: std::sync::Arc<TlsConfig>) -> Result<Self> {
+        // Try to bind to a port in the CConnect range
+        for port in PORT_RANGE_START..=PORT_RANGE_END {
+            let addr = format!("0.0.0.0:{}", port);
+            if let Ok(listener) = TcpListener::bind(&addr).await {
+                info!("TLS Payload server listening on port {}", port);
+                return Ok(Self {
+                    listener,
+                    port,
+                    tls_config,
+                    progress_callback: None,
+                });
+            }
+        }
+
+        Err(ProtocolError::Io(std::io::Error::new(
+            std::io::ErrorKind::AddrInUse,
+            format!(
+                "Failed to bind TLS payload server - all ports in range {}-{} are in use",
+                PORT_RANGE_START, PORT_RANGE_END
+            ),
+        )))
+    }
+
+    /// Get the port the server is listening on
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// Set a progress callback for transfer updates
+    ///
+    /// The callback receives (bytes_transferred, total_bytes) and returns
+    /// `true` to continue or `false` to cancel the transfer.
+    pub fn with_progress(mut self, callback: ProgressCallback) -> Self {
+        self.progress_callback = Some(callback);
+        self
+    }
+
+    /// Accept connection and send file over TLS
+    ///
+    /// Waits for a single connection, performs TLS handshake as CLIENT (inverted role),
+    /// and streams file data over the encrypted connection.
+    ///
+    /// # Parameters
+    ///
+    /// - `file_path`: Path to the file to send
+    ///
+    /// # Errors
+    ///
+    /// Returns error if:
+    /// - Connection times out
+    /// - TLS handshake fails
+    /// - File cannot be read
+    /// - Transfer fails
+    /// - Transfer is cancelled via progress callback
+    pub async fn send_file(self, file_path: impl AsRef<Path>) -> Result<()> {
+        let file_path = file_path.as_ref();
+        info!("Waiting for TLS connection to send file: {:?}", file_path);
+
+        // Accept TCP connection
+        let (tcp_stream, peer_addr) = timeout(CONNECTION_TIMEOUT, self.listener.accept())
+            .await
+            .map_err(|_| {
+                ProtocolError::Io(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "No client connected within timeout",
+                ))
+            })?
+            .map_err(ProtocolError::Io)?;
+
+        info!(
+            "Accepted TCP connection from {} for TLS file transfer",
+            peer_addr
+        );
+
+        // KDE Connect quirk: TCP acceptor acts as TLS CLIENT
+        // Create TLS connector with CLIENT config (inverted role!)
+        let connector = TlsConnector::from(self.tls_config.client_config());
+
+        // Use a dummy server name since we're using TOFU
+        let server_name = rustls::pki_types::ServerName::try_from("kdeconnect")
+            .map_err(|e| ProtocolError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("Invalid server name: {}", e),
+            )))?;
+
+        // Perform TLS handshake as CLIENT (inverted role!)
+        let mut tls_stream = timeout(CONNECTION_TIMEOUT, connector.connect(server_name, tcp_stream))
+            .await
+            .map_err(|_| {
+                ProtocolError::Io(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "TLS handshake timeout",
+                ))
+            })?
+            .map_err(|e| {
+                error!("TLS handshake failed for payload transfer: {}", e);
+                ProtocolError::Io(std::io::Error::new(
+                    std::io::ErrorKind::ConnectionRefused,
+                    format!("TLS handshake failed: {}", e),
+                ))
+            })?;
+
+        info!(
+            "TLS connection established with {} for file transfer (as TLS CLIENT)",
+            peer_addr
+        );
+
+        // Open file and get size
+        let mut file = File::open(file_path).await.map_err(ProtocolError::Io)?;
+        let file_size = file.metadata().await.map_err(ProtocolError::Io)?.len();
+
+        // Stream file data over TLS
+        let mut buffer = vec![0u8; BUFFER_SIZE];
+        let mut total_bytes: u64 = 0;
+
+        loop {
+            let bytes_read = timeout(TRANSFER_TIMEOUT, file.read(&mut buffer))
+                .await
+                .map_err(|_| {
+                    ProtocolError::Io(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "Read timeout",
+                    ))
+                })?
+                .map_err(ProtocolError::Io)?;
+
+            if bytes_read == 0 {
+                break;
+            }
+
+            // Write to TLS stream
+            timeout(
+                TRANSFER_TIMEOUT,
+                tls_stream.write_all(&buffer[..bytes_read]),
+            )
+            .await
+            .map_err(|_| {
+                ProtocolError::Io(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "Write timeout",
+                ))
+            })?
+            .map_err(ProtocolError::Io)?;
+
+            total_bytes += bytes_read as u64;
+
+            debug!(
+                "Sent {} bytes over TLS ({}/{} total)",
+                bytes_read, total_bytes, file_size
+            );
+
+            // Call progress callback if set
+            if let Some(ref callback) = self.progress_callback {
+                if !callback(total_bytes, file_size) {
+                    info!("Transfer cancelled by progress callback");
+                    return Err(ProtocolError::Io(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "Transfer cancelled",
+                    )));
+                }
+            }
+        }
+
+        // Flush TLS stream
+        tls_stream.flush().await.map_err(ProtocolError::Io)?;
+
+        info!(
+            "TLS file transfer complete: {} bytes sent to {}",
+            total_bytes, peer_addr
+        );
+
+        Ok(())
     }
 }
 
