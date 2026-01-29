@@ -488,6 +488,52 @@ impl Config {
     pub fn device_registry_path(&self) -> PathBuf {
         self.paths.data_dir.join("devices.json")
     }
+
+    /// Get the device ID file path (for persisting auto-generated device IDs)
+    pub fn device_id_path(&self) -> PathBuf {
+        self.paths.data_dir.join("device_id")
+    }
+
+    /// Load device ID from config or saved file
+    ///
+    /// Priority:
+    /// 1. Config file device_id setting
+    /// 2. Saved device_id file
+    /// 3. None (caller should generate new)
+    pub fn load_device_id(&self) -> Option<String> {
+        // First check config
+        if let Some(ref id) = self.device.device_id {
+            return Some(id.clone());
+        }
+
+        // Then check saved file
+        let device_id_path = self.device_id_path();
+        if device_id_path.exists() {
+            if let Ok(id) = fs::read_to_string(&device_id_path) {
+                let id = id.trim().to_string();
+                if !id.is_empty() {
+                    tracing::info!("Loaded device ID from {}", device_id_path.display());
+                    return Some(id);
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Save a generated device ID to file
+    pub fn save_device_id(&self, device_id: &str) -> Result<()> {
+        let device_id_path = self.device_id_path();
+
+        // Ensure parent directory exists
+        if let Some(parent) = device_id_path.parent() {
+            fs::create_dir_all(parent).context("Failed to create data directory")?;
+        }
+
+        fs::write(&device_id_path, device_id).context("Failed to save device ID")?;
+        tracing::info!("Saved device ID to {}", device_id_path.display());
+        Ok(())
+    }
 }
 
 #[cfg(test)]

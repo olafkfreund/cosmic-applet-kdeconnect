@@ -142,21 +142,27 @@ impl Daemon {
             _ => DeviceType::Desktop,
         };
 
-        let device_info = if let Some(device_id) = &config.device.device_id {
-            // Use configured device ID
+        let device_info = if let Some(device_id) = config.load_device_id() {
+            // Use saved or configured device ID
+            info!("Using existing device ID: {}", device_id);
             DeviceInfo::with_id(
-                device_id,
+                &device_id,
                 &config.device.name,
                 device_type,
                 config.network.discovery_port,
             )
         } else {
-            // Generate new device ID
-            DeviceInfo::new(
+            // Generate new device ID and save it
+            let info = DeviceInfo::new(
                 &config.device.name,
                 device_type,
                 config.network.discovery_port,
-            )
+            );
+            info!("Generated new device ID: {}", info.device_id);
+            if let Err(e) = config.save_device_id(&info.device_id) {
+                warn!("Failed to save device ID: {}. ID will change on next restart.", e);
+            }
+            info
         };
 
         // Create plugin manager
