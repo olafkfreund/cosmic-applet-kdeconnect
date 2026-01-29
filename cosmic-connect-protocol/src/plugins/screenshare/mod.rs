@@ -583,6 +583,37 @@ impl ScreenSharePlugin {
     pub fn is_receiving(&self) -> bool {
         self.receiving
     }
+
+    /// Initiate screen sharing to the connected device
+    ///
+    /// This starts local capture and sends a start packet to the remote device.
+    /// The remote device will respond with a ready packet containing their receiving port.
+    pub async fn share_to_device(&mut self, config: ShareConfig) -> Result<()> {
+        // Validate config
+        config.validate()?;
+
+        // Start local sharing session
+        self.start_sharing(config.clone()).await?;
+
+        // Send start packet to remote device
+        if let Some(sender) = &self.packet_sender {
+            if let Some(device_id) = &self.device_id {
+                let body = serde_json::to_value(&config)
+                    .map_err(|e| ProtocolError::Plugin(format!("Failed to serialize config: {}", e)))?;
+                let packet = Packet::new("cconnect.screenshare.start", body);
+
+                sender.send((device_id.clone(), packet)).await
+                    .map_err(|_| ProtocolError::Plugin("Failed to send start packet".to_string()))?;
+
+                info!("Sent screen share start to {}", device_id);
+                Ok(())
+            } else {
+                Err(ProtocolError::Plugin("No device ID set".to_string()))
+            }
+        } else {
+            Err(ProtocolError::Plugin("No packet sender available".to_string()))
+        }
+    }
 }
 
 impl Default for ScreenSharePlugin {
