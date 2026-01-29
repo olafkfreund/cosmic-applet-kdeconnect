@@ -6,7 +6,7 @@
 //! Uses RFCOMM (Bluetooth Classic) for compatibility with Android's BluetoothSocket.
 
 use crate::{
-    transport::{BluetoothConnection, Transport},
+    transport::{BluetoothConnection, BluetoothListener, Transport},
     transport_manager::TransportManagerEvent,
     Packet, ProtocolError, Result,
 };
@@ -16,6 +16,9 @@ use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
+
+/// Default RFCOMM channel for listening
+const DEFAULT_RFCOMM_CHANNEL: u8 = 1;
 
 /// Commands that can be sent to a Bluetooth connection task
 enum BluetoothConnectionCommand {
@@ -53,6 +56,12 @@ pub struct BluetoothConnectionManager {
     /// Bluetooth operation timeout
     #[allow(dead_code)]
     timeout: Duration,
+
+    /// Listener task handle (for accepting incoming connections)
+    listener_task: Arc<RwLock<Option<JoinHandle<()>>>>,
+
+    /// RFCOMM channel we're listening on
+    rfcomm_channel: Arc<RwLock<Option<u8>>>,
 }
 
 impl BluetoothConnectionManager {
@@ -65,17 +74,109 @@ impl BluetoothConnectionManager {
             event_tx,
             event_rx: Arc::new(RwLock::new(event_rx)),
             timeout,
+            listener_task: Arc::new(RwLock::new(None)),
+            rfcomm_channel: Arc::new(RwLock::new(None)),
         })
     }
 
     /// Start the Bluetooth connection manager
     ///
-    /// For Bluetooth RFCOMM, we can either listen for incoming connections
-    /// or initiate outgoing connections. Devices are discovered via
-    /// BlueZ's paired device list.
+    /// This binds an RFCOMM listener to accept incoming connections from
+    /// Android devices. The listener runs on a background task.
     pub async fn start(&self) -> Result<()> {
-        info!("Bluetooth RFCOMM connection manager started");
+        info!("Starting Bluetooth RFCOMM connection manager...");
+
+        // Try to bind a listener on the default RFCOMM channel
+        let listener = match BluetoothListener::bind(Some(DEFAULT_RFCOMM_CHANNEL)).await {
+            Ok(l) => {
+                info!(
+                    "Bluetooth RFCOMM listener bound on channel {}",
+                    l.channel()
+                );
+                l
+            }
+            Err(e) => {
+                // Try with any available channel
+                warn!(
+                    "Failed to bind RFCOMM on channel {}: {}, trying any available channel",
+                    DEFAULT_RFCOMM_CHANNEL, e
+                );
+                match BluetoothListener::bind(None).await {
+                    Ok(l) => {
+                        info!(
+                            "Bluetooth RFCOMM listener bound on channel {}",
+                            l.channel()
+                        );
+                        l
+                    }
+                    Err(e2) => {
+                        error!("Failed to bind RFCOMM listener: {}", e2);
+                        // Continue without listener - outgoing connections still work
+                        info!("Bluetooth RFCOMM connection manager started (outgoing only)");
+                        return Ok(());
+                    }
+                }
+            }
+        };
+
+        // Store the channel we're listening on
+        {
+            let mut channel = self.rfcomm_channel.write().await;
+            *channel = Some(listener.channel());
+        }
+
+        // Spawn the listener task
+        let connections = self.connections.clone();
+        let event_tx = self.event_tx.clone();
+
+        let task = tokio::spawn(async move {
+            info!("Bluetooth RFCOMM listener task started");
+
+            loop {
+                match listener.accept().await {
+                    Ok((connection, remote_addr)) => {
+                        info!(
+                            "Accepted Bluetooth connection from {}",
+                            remote_addr
+                        );
+
+                        // Generate a device ID from the Bluetooth address
+                        // The actual device ID will be determined during identity exchange
+                        let bt_address = remote_addr.to_string();
+                        let temp_device_id = format!("bt_{}", bt_address.replace(':', "_"));
+
+                        // Spawn connection handler
+                        Self::spawn_connection_handler(
+                            connection,
+                            temp_device_id,
+                            bt_address,
+                            event_tx.clone(),
+                            connections.clone(),
+                        );
+                    }
+                    Err(e) => {
+                        error!("Error accepting Bluetooth connection: {}", e);
+                        // Small delay to avoid tight loop on persistent errors
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                }
+            }
+        });
+
+        // Store the task handle
+        {
+            let mut listener_task = self.listener_task.write().await;
+            *listener_task = Some(task);
+        }
+
+        info!("Bluetooth RFCOMM connection manager started (listening on channel {})",
+              self.rfcomm_channel.read().await.unwrap_or(0));
         Ok(())
+    }
+
+    /// Get the RFCOMM channel we're listening on
+    pub async fn listening_channel(&self) -> Option<u8> {
+        *self.rfcomm_channel.read().await
     }
 
     /// Connect to a remote device via Bluetooth RFCOMM
@@ -318,6 +419,15 @@ impl BluetoothConnectionManager {
     /// Stop the Bluetooth connection manager
     pub async fn stop(&self) {
         info!("Stopping Bluetooth connection manager");
+
+        // Stop the listener task
+        {
+            let mut listener_task = self.listener_task.write().await;
+            if let Some(task) = listener_task.take() {
+                task.abort();
+                info!("Bluetooth listener task stopped");
+            }
+        }
 
         // Disconnect all devices
         let device_ids: Vec<String> = {
