@@ -2297,27 +2297,29 @@ impl Daemon {
 
         tokio::spawn(async move {
             let mut receiver_guard = packet_receiver_mutex.lock().await;
-            if let Some(mut receiver) = receiver_guard.take() {
-                drop(receiver_guard); // Release mutex
-                info!("Started proactive packet handler");
-                while let Some((device_id, packet)) = receiver.recv().await {
-                    // Intercept internal signaling packets
-                    if packet.packet_type == "cconnect.internal.screenshare.requested" {
-                        if let Some(dbus) = &dbus_server {
-                            if let Err(e) = dbus.emit_screen_share_requested(&device_id).await {
-                                error!("Failed to emit screen_share_requested signal: {}", e);
-                            }
-                        }
-                        continue;
-                    }
+            let Some(mut receiver) = receiver_guard.take() else {
+                return;
+            };
+            drop(receiver_guard); // Release mutex
 
+            info!("Started proactive packet handler");
+            while let Some((device_id, packet)) = receiver.recv().await {
+                // Handle internal signaling packets for DBus emission
+                let handled = if let Some(dbus) = &dbus_server {
+                    handle_internal_packet(dbus, &device_id, &packet).await
+                } else {
+                    false
+                };
+
+                // Forward non-internal packets to the connection manager
+                if !handled {
                     let manager = connection_manager.read().await;
                     if let Err(e) = manager.send_packet(&device_id, &packet).await {
                         error!("Failed to send proactive packet to {}: {}", device_id, e);
                     }
                 }
-                info!("Proactive packet handler stopped");
             }
+            info!("Proactive packet handler stopped");
         });
 
         // Get capabilities from plugin manager
@@ -2414,6 +2416,87 @@ impl Daemon {
 
         info!("Daemon shutdown complete");
         Ok(())
+    }
+}
+
+/// Handle internal signaling packets for DBus emission
+///
+/// Returns true if the packet was an internal packet and was handled,
+/// false if it should be forwarded to the connection manager.
+async fn handle_internal_packet(
+    dbus: &dbus::DbusServer,
+    device_id: &str,
+    packet: &Packet,
+) -> bool {
+    match packet.packet_type.as_str() {
+        "cconnect.internal.screenshare.requested" => {
+            if let Err(e) = dbus.emit_screen_share_requested(device_id).await {
+                error!("Failed to emit screen_share_requested signal: {}", e);
+            }
+            true
+        }
+        "cconnect.internal.screenshare.started" => {
+            let is_sender = packet
+                .body
+                .get("is_sender")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if let Err(e) = dbus.emit_screen_share_started(device_id, is_sender).await {
+                error!("Failed to emit screen_share_started signal: {}", e);
+            }
+            true
+        }
+        "cconnect.internal.screenshare.stopped" => {
+            if let Err(e) = dbus.emit_screen_share_stopped(device_id).await {
+                error!("Failed to emit screen_share_stopped signal: {}", e);
+            }
+            true
+        }
+        "cconnect.internal.screenshare.cursor" => {
+            let x = packet.body.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let y = packet.body.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let visible = packet
+                .body
+                .get("visible")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            if let Err(e) = dbus
+                .emit_screen_share_cursor_update(device_id, x, y, visible)
+                .await
+            {
+                error!("Failed to emit screen_share_cursor_update signal: {}", e);
+            }
+            true
+        }
+        "cconnect.internal.screenshare.annotation" => {
+            let annotation_type = packet
+                .body
+                .get("annotation_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let x1 = packet.body.get("x1").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let y1 = packet.body.get("y1").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let x2 = packet.body.get("x2").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let y2 = packet.body.get("y2").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+            let color = packet
+                .body
+                .get("color")
+                .and_then(|v| v.as_str())
+                .unwrap_or("#FF0000");
+            let width = packet
+                .body
+                .get("width")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(3) as u8;
+            if let Err(e) = dbus
+                .emit_screen_share_annotation(device_id, annotation_type, x1, y1, x2, y2, color, width)
+                .await
+            {
+                error!("Failed to emit screen_share_annotation signal: {}", e);
+            }
+            true
+        }
+        _ => false, // Not an internal packet
     }
 }
 

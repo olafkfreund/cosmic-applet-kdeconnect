@@ -15,7 +15,7 @@ use std::sync::Arc;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
-use zbus::object_server::SignalEmitter;
+use zbus::object_server::{InterfaceRef, SignalEmitter};
 use zbus::{connection, interface, Connection};
 
 /// Tracks active file transfers with cancellation support
@@ -2493,6 +2493,55 @@ impl CConnectInterface {
         signal_emitter: &SignalEmitter<'_>,
         device_id: &str,
     ) -> zbus::Result<()>;
+
+    /// Signal: Screen share started
+    ///
+    /// Emitted when screen share streaming begins (either direction).
+    #[zbus(signal)]
+    async fn screen_share_started(
+        signal_emitter: &SignalEmitter<'_>,
+        device_id: &str,
+        is_sender: bool,
+    ) -> zbus::Result<()>;
+
+    /// Signal: Screen share stopped
+    ///
+    /// Emitted when screen share streaming ends.
+    #[zbus(signal)]
+    async fn screen_share_stopped(
+        signal_emitter: &SignalEmitter<'_>,
+        device_id: &str,
+    ) -> zbus::Result<()>;
+
+    /// Signal: Screen share cursor update
+    ///
+    /// Emitted when presenter's cursor position changes.
+    /// UI can use this to show a highlight effect around the cursor.
+    #[zbus(signal)]
+    async fn screen_share_cursor_update(
+        signal_emitter: &SignalEmitter<'_>,
+        device_id: &str,
+        x: i32,
+        y: i32,
+        visible: bool,
+    ) -> zbus::Result<()>;
+
+    /// Signal: Screen share annotation
+    ///
+    /// Emitted when presenter draws an annotation on the shared screen.
+    /// UI can use this to render drawing overlays.
+    #[zbus(signal)]
+    async fn screen_share_annotation(
+        signal_emitter: &SignalEmitter<'_>,
+        device_id: &str,
+        annotation_type: &str,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        color: &str,
+        width: u8,
+    ) -> zbus::Result<()>;
 }
 
 /// DBus server for the daemon
@@ -2572,6 +2621,15 @@ impl DbusServer {
     #[allow(dead_code)]
     pub fn connection(&self) -> &Connection {
         &self.connection
+    }
+
+    /// Get the interface reference for signal emission
+    async fn interface_ref(&self) -> Result<InterfaceRef<CConnectInterface>> {
+        self.connection
+            .object_server()
+            .interface::<_, CConnectInterface>(OBJECT_PATH)
+            .await
+            .context("Failed to get interface reference")
     }
 
     /// Emit a device_added signal
@@ -2754,14 +2812,87 @@ impl DbusServer {
 
     /// Emit a screen_share_requested signal
     pub async fn emit_screen_share_requested(&self, device_id: &str) -> Result<()> {
-        let object_server = self.connection.object_server();
-        let iface_ref = object_server
-            .interface::<_, CConnectInterface>(OBJECT_PATH)
-            .await?;
-
+        let iface_ref = self.interface_ref().await?;
         CConnectInterface::screen_share_requested(iface_ref.signal_emitter(), device_id).await?;
-
         debug!("Emitted ScreenShareRequested signal for {}", device_id);
+        Ok(())
+    }
+
+    /// Emit a screen_share_started signal
+    pub async fn emit_screen_share_started(&self, device_id: &str, is_sender: bool) -> Result<()> {
+        let iface_ref = self.interface_ref().await?;
+        CConnectInterface::screen_share_started(iface_ref.signal_emitter(), device_id, is_sender)
+            .await?;
+        debug!(
+            "Emitted ScreenShareStarted signal for {} (sender={})",
+            device_id, is_sender
+        );
+        Ok(())
+    }
+
+    /// Emit a screen_share_stopped signal
+    pub async fn emit_screen_share_stopped(&self, device_id: &str) -> Result<()> {
+        let iface_ref = self.interface_ref().await?;
+        CConnectInterface::screen_share_stopped(iface_ref.signal_emitter(), device_id).await?;
+        debug!("Emitted ScreenShareStopped signal for {}", device_id);
+        Ok(())
+    }
+
+    /// Emit a screen_share_cursor_update signal
+    pub async fn emit_screen_share_cursor_update(
+        &self,
+        device_id: &str,
+        x: i32,
+        y: i32,
+        visible: bool,
+    ) -> Result<()> {
+        let iface_ref = self.interface_ref().await?;
+        CConnectInterface::screen_share_cursor_update(
+            iface_ref.signal_emitter(),
+            device_id,
+            x,
+            y,
+            visible,
+        )
+        .await?;
+        tracing::trace!(
+            "Emitted ScreenShareCursorUpdate signal for {} at ({}, {})",
+            device_id,
+            x,
+            y
+        );
+        Ok(())
+    }
+
+    /// Emit a screen_share_annotation signal
+    pub async fn emit_screen_share_annotation(
+        &self,
+        device_id: &str,
+        annotation_type: &str,
+        x1: i32,
+        y1: i32,
+        x2: i32,
+        y2: i32,
+        color: &str,
+        width: u8,
+    ) -> Result<()> {
+        let iface_ref = self.interface_ref().await?;
+        CConnectInterface::screen_share_annotation(
+            iface_ref.signal_emitter(),
+            device_id,
+            annotation_type,
+            x1,
+            y1,
+            x2,
+            y2,
+            color,
+            width,
+        )
+        .await?;
+        debug!(
+            "Emitted ScreenShareAnnotation signal for {} ({})",
+            device_id, annotation_type
+        );
         Ok(())
     }
 }

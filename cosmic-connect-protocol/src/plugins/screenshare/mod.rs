@@ -902,6 +902,17 @@ impl ScreenSharePlugin {
         self.sender_tasks.len()
     }
 
+    /// Emit an internal packet for DBus signaling
+    ///
+    /// Internal packets are intercepted by the daemon and converted to DBus signals.
+    /// Errors are silently ignored since signal emission is best-effort.
+    async fn emit_internal_packet(&self, device_id: &str, packet_type: &str, body: serde_json::Value) {
+        if let Some(sender) = &self.packet_sender {
+            let packet = Packet::new(packet_type, body);
+            let _ = sender.send((device_id.to_string(), packet)).await;
+        }
+    }
+
     /// Stop all streaming tasks
     pub async fn stop_streaming(&mut self) {
         // Signal stop
@@ -989,10 +1000,10 @@ impl Plugin for ScreenSharePlugin {
             return Ok(());
         }
 
+        let device_id = device.id();
         debug!("Handling packet type: {}", packet.packet_type);
 
         if packet.is_type("cconnect.screenshare.start") {
-            // Remote device started sharing
             let config: ShareConfig = serde_json::from_value(packet.body.clone())
                 .map_err(|e| ProtocolError::InvalidPacket(e.to_string()))?;
 
@@ -1010,92 +1021,120 @@ impl Plugin for ScreenSharePlugin {
                 info!("Sending ready packet with port {}", port);
                 if let Some(sender) = &self.packet_sender {
                     let body = serde_json::json!({ "tcpPort": port });
-                    let packet = Packet::new("cconnect.screenshare.ready", body);
-                    if let Err(e) = sender.send((self.device_id.clone().unwrap_or_default(), packet)).await {
+                    let ready_packet = Packet::new("cconnect.screenshare.ready", body);
+                    if let Err(e) = sender.send((device_id.to_string(), ready_packet)).await {
                         error!("Failed to send ready packet: {}", e);
                     }
                 }
             } else {
-                // UI not ready, request UI start (emit internal packet)
+                // UI not ready, request UI start
                 info!("Screen share started by remote, requesting UI launch");
-                if let Some(sender) = &self.packet_sender {
-                    let packet = Packet::new("cconnect.internal.screenshare.requested", serde_json::json!({}));
-                    if let Err(e) = sender.send((self.device_id.clone().unwrap_or_default(), packet)).await {
-                        error!("Failed to send internal request: {}", e);
-                    }
-                }
+                self.emit_internal_packet(
+                    device_id,
+                    "cconnect.internal.screenshare.requested",
+                    serde_json::json!({}),
+                )
+                .await;
             }
         } else if packet.is_type("cconnect.screenshare.frame") {
-            // Receive screen frame
             if !self.receiving {
                 warn!("Received frame but not in receiving mode");
                 return Ok(());
             }
-
-            // Frames are handled via separate TCP stream, this packet type is likely unused
-            // in the custom protocol, but kept for compatibility or fallback.
+            // Frames are handled via separate TCP stream
             debug!("Received screen frame packet (unexpected for streaming mode)");
         } else if packet.is_type("cconnect.screenshare.cursor") {
-            // Receive cursor position (for highlighting when cursor is not embedded in stream)
             let position: CursorPosition = serde_json::from_value(packet.body.clone())
                 .map_err(|e| ProtocolError::InvalidPacket(e.to_string()))?;
 
-            // Note: When using CursorMode::Embedded, cursor is already in video frames.
-            // This packet is for cursor highlighting overlay or when using CursorMode::Metadata.
-            // Future: Emit DBus signal for UI to show cursor highlight effect
+            self.emit_internal_packet(
+                device_id,
+                "cconnect.internal.screenshare.cursor",
+                serde_json::json!({
+                    "x": position.x,
+                    "y": position.y,
+                    "visible": position.visible
+                }),
+            )
+            .await;
+
             debug!("Cursor updated: ({}, {})", position.x, position.y);
         } else if packet.is_type("cconnect.screenshare.annotation") {
-            // Receive annotation (presenter drawing on shared screen)
             let annotation: Annotation = serde_json::from_value(packet.body.clone())
                 .map_err(|e| ProtocolError::InvalidPacket(e.to_string()))?;
 
-            // Future: Emit DBus signal for UI to render annotation overlay
+            self.emit_internal_packet(
+                device_id,
+                "cconnect.internal.screenshare.annotation",
+                serde_json::json!({
+                    "annotation_type": annotation.annotation_type,
+                    "x1": annotation.x1,
+                    "y1": annotation.y1,
+                    "x2": annotation.x2.unwrap_or(0),
+                    "y2": annotation.y2.unwrap_or(0),
+                    "color": annotation.color,
+                    "width": annotation.width
+                }),
+            )
+            .await;
+
             debug!("Annotation received: {}", annotation.annotation_type);
         } else if packet.is_type("cconnect.screenshare.stop") {
-            // Remote device stopped sharing or viewer disconnected
             info!("Screen share stop from {}", device.name());
 
-            // If we're receiving, mark as not receiving
-            if self.receiving {
-                self.receiving = false;
-                // TODO: Emit DBus signal to close viewer UI
-            }
+            self.emit_internal_packet(
+                device_id,
+                "cconnect.internal.screenshare.stopped",
+                serde_json::json!({}),
+            )
+            .await;
 
-            // If this device was a viewer, remove their stream
-            let viewer_id = device.id().to_string();
+            self.receiving = false;
+
+            // Remove this device as a viewer if applicable
+            let viewer_id = device_id.to_string();
             self.remove_viewer_stream(&viewer_id).await;
             self.remove_viewer(&viewer_id);
         } else if packet.is_type("cconnect.screenshare.ready") {
-            // Receiver is ready to receive screen share
-            // This is sent by the receiving device after it opens its viewer window
-            let tcp_port = packet.body.get("tcpPort")
+            let tcp_port = packet
+                .body
+                .get("tcpPort")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as u16;
 
-            info!(
-                "Receiver {} is ready on port {}",
-                device.name(),
-                tcp_port
-            );
+            info!("Receiver {} is ready on port {}", device.name(), tcp_port);
 
-            // Add this device as a viewer
-            if let Err(e) = self.add_viewer(device.id().to_string()) {
-                warn!("Failed to add viewer {}: {}", device.id(), e);
+            if let Err(e) = self.add_viewer(device_id.to_string()) {
+                warn!("Failed to add viewer {}: {}", device_id, e);
             }
 
-            // Get the device's host address for TCP connection
             let host = device.host.clone().ok_or_else(|| {
-                error!("Cannot stream to device {}: no host address available", device.name());
+                error!(
+                    "Cannot stream to device {}: no host address available",
+                    device.name()
+                );
                 ProtocolError::Plugin("Device has no host address for streaming".to_string())
             })?;
 
-            // Start streaming to the device
-            let viewer_id = device.id().to_string();
-            self.start_streaming_to_device(host.clone(), tcp_port, viewer_id.clone()).await
+            let viewer_id = device_id.to_string();
+            self.start_streaming_to_device(host.clone(), tcp_port, viewer_id)
+                .await
                 .inspect_err(|e| error!("Failed to start streaming to {}:{}: {}", host, tcp_port, e))?;
 
-            info!("Started streaming screen share to {} ({}:{}) [viewers: {}]",
-                device.name(), host, tcp_port, self.viewer_count());
+            self.emit_internal_packet(
+                device_id,
+                "cconnect.internal.screenshare.started",
+                serde_json::json!({ "is_sender": true }),
+            )
+            .await;
+
+            info!(
+                "Started streaming screen share to {} ({}:{}) [viewers: {}]",
+                device.name(),
+                host,
+                tcp_port,
+                self.viewer_count()
+            );
         }
 
         Ok(())
