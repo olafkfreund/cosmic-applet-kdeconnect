@@ -80,6 +80,7 @@ use crate::{Device, Packet, Result};
 use async_trait::async_trait;
 use serde_json::json;
 use std::any::Any;
+use std::sync::{Arc, RwLock};
 use tracing::{debug, info, warn};
 
 use super::logind_backend::LogindBackend;
@@ -93,8 +94,8 @@ pub struct LockPlugin {
     /// Whether the plugin is enabled
     enabled: bool,
 
-    /// Current lock state (cached)
-    is_locked: bool,
+    /// Current lock state (thread-safe cached)
+    lock_state: Arc<RwLock<bool>>,
 
     /// Logind DBus backend for screen lock control
     logind_backend: LogindBackend,
@@ -106,8 +107,51 @@ impl LockPlugin {
         Self {
             device_id: None,
             enabled: false,
-            is_locked: false,
+            lock_state: Arc::new(RwLock::new(false)),
             logind_backend: LogindBackend::new(),
+        }
+    }
+
+    /// Check if the desktop is currently locked
+    ///
+    /// Returns the cached lock state. This is updated when lock state
+    /// changes are received from remote devices or when queried locally.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use cosmic_connect_protocol::plugins::lock::LockPlugin;
+    ///
+    /// let plugin = LockPlugin::new();
+    /// let is_locked = plugin.is_locked();
+    /// println!("Desktop locked: {}", is_locked);
+    /// ```
+    pub fn is_locked(&self) -> bool {
+        self.lock_state.read().map(|guard| *guard).unwrap_or(false)
+    }
+
+    /// Get the lock state Arc for external monitoring
+    ///
+    /// This allows external code to hold a reference to the lock state
+    /// and receive updates when the state changes.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use cosmic_connect_protocol::plugins::lock::LockPlugin;
+    ///
+    /// let plugin = LockPlugin::new();
+    /// let lock_state = plugin.get_lock_state();
+    /// // Can be cloned and passed to UI components
+    /// ```
+    pub fn get_lock_state(&self) -> Arc<RwLock<bool>> {
+        Arc::clone(&self.lock_state)
+    }
+
+    /// Update the cached lock state
+    fn set_lock_state(&self, locked: bool) {
+        if let Ok(mut guard) = self.lock_state.write() {
+            *guard = locked;
         }
     }
 
@@ -233,7 +277,7 @@ impl LockPlugin {
 
         match result {
             Ok(()) => {
-                self.is_locked = set_locked;
+                self.set_lock_state(set_locked);
                 // TODO: Send state update back to device
                 // let state_packet = self.create_lock_state(set_locked);
                 // device.send_packet(&state_packet).await?;
@@ -256,7 +300,7 @@ impl LockPlugin {
 
         match self.query_lock_state().await {
             Ok(locked) => {
-                self.is_locked = locked;
+                self.set_lock_state(locked);
                 // TODO: Send state update back to device
                 // let state_packet = self.create_lock_state(locked);
                 // device.send_packet(&state_packet).await?;
@@ -271,43 +315,37 @@ impl LockPlugin {
 
     /// Handle lock state update from remote device
     async fn handle_lock_state(&mut self, packet: &Packet, device: &Device) -> Result<()> {
-        if let Some(is_locked) = packet.body.get("isLocked").and_then(|v| v.as_bool()) {
+        if let Some(locked) = packet.body.get("isLocked").and_then(|v| v.as_bool()) {
             info!(
                 "Received lock state from {} ({}): {}",
                 device.name(),
                 device.id(),
-                if is_locked { "locked" } else { "unlocked" }
+                if locked { "locked" } else { "unlocked" }
             );
-            self.is_locked = is_locked;
+            self.set_lock_state(locked);
         }
         Ok(())
     }
 
     /// Lock the desktop using logind DBus
     async fn lock_desktop(&mut self) -> Result<()> {
-        self.logind_backend
-            .lock()
-            .await
-            .map_err(|e| crate::ProtocolError::invalid_state(format!("Failed to lock desktop: {}", e)))
+        self.logind_backend.lock().await.map_err(|e| {
+            crate::ProtocolError::invalid_state(format!("Failed to lock desktop: {}", e))
+        })
     }
 
     /// Unlock the desktop using logind DBus
     async fn unlock_desktop(&mut self) -> Result<()> {
-        self.logind_backend
-            .unlock()
-            .await
-            .map_err(|e| crate::ProtocolError::invalid_state(format!("Failed to unlock desktop: {}", e)))
+        self.logind_backend.unlock().await.map_err(|e| {
+            crate::ProtocolError::invalid_state(format!("Failed to unlock desktop: {}", e))
+        })
     }
 
     /// Query current lock state from logind DBus
     async fn query_lock_state(&mut self) -> Result<bool> {
         debug!("Querying lock state via logind DBus");
 
-        let is_locked = self
-            .logind_backend
-            .is_locked()
-            .await
-            .unwrap_or(false);
+        let is_locked = self.logind_backend.is_locked().await.unwrap_or(false);
 
         debug!("Current lock state: {}", is_locked);
         Ok(is_locked)
@@ -350,7 +388,11 @@ impl Plugin for LockPlugin {
         ]
     }
 
-    async fn init(&mut self, device: &Device, _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>) -> Result<()> {
+    async fn init(
+        &mut self,
+        device: &Device,
+        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+    ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
         info!("Lock plugin initialized for device {}", device.name());
         Ok(())
@@ -368,7 +410,7 @@ impl Plugin for LockPlugin {
 
         // Query initial lock state
         if let Ok(locked) = self.query_lock_state().await {
-            self.is_locked = locked;
+            self.set_lock_state(locked);
             info!("Initial lock state: {}", locked);
         }
 
@@ -387,14 +429,12 @@ impl Plugin for LockPlugin {
             return Ok(());
         }
 
-        match packet.packet_type.as_str() {
-            "cconnect.lock.request" | "kdeconnect.lock.request" => {
-                self.handle_lock_request(packet, device).await
-            }
-            "cconnect.lock" | "kdeconnect.lock" => {
-                self.handle_lock_state(packet, device).await
-            }
-            _ => Ok(()),
+        if packet.is_type("cconnect.lock.request") || packet.is_type("kdeconnect.lock.request") {
+            self.handle_lock_request(packet, device).await
+        } else if packet.is_type("cconnect.lock") || packet.is_type("kdeconnect.lock") {
+            self.handle_lock_state(packet, device).await
+        } else {
+            Ok(())
         }
     }
 }
@@ -431,22 +471,11 @@ impl PluginFactory for LockPluginFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{DeviceInfo, DeviceType};
 
     fn create_test_device() -> Device {
-        use crate::{DeviceInfo, DeviceType};
-        Device::new(
-            DeviceInfo {
-                device_id: "test_device".to_string(),
-                device_name: "Test Device".to_string(),
-                device_type: DeviceType::Phone,
-                protocol_version: 7,
-                incoming_capabilities: vec!["cconnect.lock".to_string()],
-                outgoing_capabilities: vec!["cconnect.lock".to_string()],
-                tcp_port: 1716,
-            },
-            crate::ConnectionState::Disconnected,
-            crate::PairingStatus::Paired,
-        )
+        let info = DeviceInfo::new("Test Device", DeviceType::Phone, 1716);
+        Device::from_discovery(info)
     }
 
     #[test]
@@ -503,13 +532,113 @@ mod tests {
         let mut plugin = LockPlugin::new();
         let device = create_test_device();
 
-        assert!(plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.is_ok());
-        assert_eq!(plugin.device_id, Some("test_device".to_string()));
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
+        assert!(plugin.device_id.is_some());
 
-        assert!(plugin.start().await.is_ok());
+        plugin.start().await.unwrap();
         assert!(plugin.enabled);
 
-        assert!(plugin.stop().await.is_ok());
+        plugin.stop().await.unwrap();
         assert!(!plugin.enabled);
+    }
+
+    #[test]
+    fn test_is_locked_initial_state() {
+        let plugin = LockPlugin::new();
+        // Initially not locked
+        assert!(!plugin.is_locked());
+    }
+
+    #[test]
+    fn test_lock_state_updates() {
+        let plugin = LockPlugin::new();
+
+        // Initial state is unlocked
+        assert!(!plugin.is_locked());
+
+        // Set to locked
+        plugin.set_lock_state(true);
+        assert!(plugin.is_locked());
+
+        // Set back to unlocked
+        plugin.set_lock_state(false);
+        assert!(!plugin.is_locked());
+    }
+
+    #[test]
+    fn test_get_lock_state_arc() {
+        let plugin = LockPlugin::new();
+        let lock_state = plugin.get_lock_state();
+
+        // Initial state
+        assert!(!*lock_state.read().unwrap());
+
+        // Update via plugin
+        plugin.set_lock_state(true);
+
+        // Arc should reflect the change
+        assert!(*lock_state.read().unwrap());
+    }
+
+    #[test]
+    fn test_lock_state_thread_safety() {
+        use std::thread;
+
+        let plugin = LockPlugin::new();
+        let lock_state = plugin.get_lock_state();
+
+        // Spawn multiple threads that read the lock state
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                let state = Arc::clone(&lock_state);
+                thread::spawn(move || {
+                    for _ in 0..100 {
+                        let _ = *state.read().unwrap();
+                    }
+                })
+            })
+            .collect();
+
+        // Update state while threads are reading
+        for i in 0..100 {
+            plugin.set_lock_state(i % 2 == 0);
+        }
+
+        // Wait for all threads
+        for handle in handles {
+            handle.join().unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_handle_lock_state_packet() {
+        let mut plugin = LockPlugin::new();
+        let device = create_test_device();
+
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
+        plugin.start().await.unwrap();
+
+        // Initial state is unlocked
+        assert!(!plugin.is_locked());
+
+        // Receive locked state from remote device
+        let packet = Packet::new("cconnect.lock", json!({ "isLocked": true }));
+        let mut test_device = create_test_device();
+        plugin.handle_packet(&packet, &mut test_device).await.unwrap();
+
+        // State should be updated
+        assert!(plugin.is_locked());
+
+        // Receive unlocked state
+        let packet = Packet::new("cconnect.lock", json!({ "isLocked": false }));
+        plugin.handle_packet(&packet, &mut test_device).await.unwrap();
+
+        assert!(!plugin.is_locked());
     }
 }
