@@ -657,6 +657,10 @@ impl Plugin for NotificationPlugin {
             "cconnect.notification.request".to_string(),
             "cconnect.notification.action".to_string(),
             "cconnect.notification.reply".to_string(),
+            "kdeconnect.notification".to_string(),
+            "kdeconnect.notification.request".to_string(),
+            "kdeconnect.notification.action".to_string(),
+            "kdeconnect.notification.reply".to_string(),
         ]
     }
 
@@ -693,13 +697,13 @@ impl Plugin for NotificationPlugin {
     }
 
     async fn handle_packet(&mut self, packet: &Packet, device: &mut Device) -> Result<()> {
-        if packet.is_type("cconnect.notification") {
+        if packet.is_type("cconnect.notification") || packet.is_type("kdeconnect.notification") {
             self.handle_notification(packet, device);
-        } else if packet.is_type("cconnect.notification.request") {
+        } else if packet.is_type("cconnect.notification.request") || packet.is_type("kdeconnect.notification.request") {
             self.handle_request(packet, device);
-        } else if packet.is_type("cconnect.notification.action") {
+        } else if packet.is_type("cconnect.notification.action") || packet.is_type("kdeconnect.notification.action") {
             self.handle_action(packet, device);
-        } else if packet.is_type("cconnect.notification.reply") {
+        } else if packet.is_type("cconnect.notification.reply") || packet.is_type("kdeconnect.notification.reply") {
             self.handle_reply(packet, device);
         }
         Ok(())
@@ -721,6 +725,10 @@ impl PluginFactory for NotificationPluginFactory {
             "cconnect.notification.request".to_string(),
             "cconnect.notification.action".to_string(),
             "cconnect.notification.reply".to_string(),
+            "kdeconnect.notification".to_string(),
+            "kdeconnect.notification.request".to_string(),
+            "kdeconnect.notification.action".to_string(),
+            "kdeconnect.notification.reply".to_string(),
         ]
     }
 
@@ -803,11 +811,15 @@ mod tests {
         let plugin = NotificationPlugin::new();
 
         let incoming = plugin.incoming_capabilities();
-        assert_eq!(incoming.len(), 4);
+        assert_eq!(incoming.len(), 8);
         assert!(incoming.contains(&"cconnect.notification".to_string()));
         assert!(incoming.contains(&"cconnect.notification.request".to_string()));
         assert!(incoming.contains(&"cconnect.notification.action".to_string()));
         assert!(incoming.contains(&"cconnect.notification.reply".to_string()));
+        assert!(incoming.contains(&"kdeconnect.notification".to_string()));
+        assert!(incoming.contains(&"kdeconnect.notification.request".to_string()));
+        assert!(incoming.contains(&"kdeconnect.notification.action".to_string()));
+        assert!(incoming.contains(&"kdeconnect.notification.reply".to_string()));
 
         let outgoing = plugin.outgoing_capabilities();
         assert_eq!(outgoing.len(), 4);
