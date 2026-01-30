@@ -918,9 +918,9 @@ impl Plugin for SharePlugin {
     }
 
     async fn handle_packet(&mut self, packet: &Packet, device: &mut Device) -> Result<()> {
-        if packet.is_type("cconnect.share.request") {
+        if packet.is_type("cconnect.share.request") || packet.is_type("kdeconnect.share.request") {
             self.handle_share_request(packet, device).await;
-        } else if packet.is_type("cconnect.share.request.update") {
+        } else if packet.is_type("cconnect.share.request.update") || packet.is_type("kdeconnect.share.request.update") {
             self.handle_multifile_update(packet, device);
         }
         Ok(())
