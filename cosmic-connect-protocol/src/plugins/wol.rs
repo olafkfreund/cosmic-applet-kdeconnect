@@ -90,6 +90,8 @@
 use crate::{Device, Packet, ProtocolError, Result};
 use async_trait::async_trait;
 use std::net::UdpSocket;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 use tracing::{debug, info, warn};
 
 use super::{Plugin, PluginFactory};
@@ -108,8 +110,11 @@ pub struct WolPlugin {
     /// Device ID this plugin is attached to
     device_id: Option<String>,
 
-    /// Stored MAC address for this device
-    mac_address: Option<String>,
+    /// Stored MAC address for this device (thread-safe)
+    mac_address: Arc<RwLock<Option<String>>>,
+
+    /// Count of WOL packets sent
+    packets_sent: Arc<AtomicU64>,
 
     /// Whether the plugin is enabled
     enabled: bool,
@@ -120,19 +125,71 @@ impl WolPlugin {
     pub fn new() -> Self {
         Self {
             device_id: None,
-            mac_address: None,
+            mac_address: Arc::new(RwLock::new(None)),
+            packets_sent: Arc::new(AtomicU64::new(0)),
             enabled: true,
         }
     }
 
     /// Get the stored MAC address
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use cosmic_connect_protocol::plugins::wol::WolPlugin;
+    ///
+    /// let plugin = WolPlugin::new();
+    /// assert!(plugin.get_mac_address().is_none());
+    /// ```
     pub fn get_mac_address(&self) -> Option<String> {
-        self.mac_address.clone()
+        self.mac_address.read().ok()?.clone()
     }
 
     /// Set the MAC address (for loading from config)
-    pub fn set_mac_address(&mut self, mac: String) {
-        self.mac_address = Some(mac);
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use cosmic_connect_protocol::plugins::wol::WolPlugin;
+    ///
+    /// let plugin = WolPlugin::new();
+    /// plugin.set_mac_address("00:11:22:33:44:55".to_string());
+    /// assert_eq!(plugin.get_mac_address(), Some("00:11:22:33:44:55".to_string()));
+    /// ```
+    pub fn set_mac_address(&self, mac: String) {
+        if let Ok(mut guard) = self.mac_address.write() {
+            *guard = Some(mac);
+        }
+    }
+
+    /// Get the number of WOL packets sent
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use cosmic_connect_protocol::plugins::wol::WolPlugin;
+    ///
+    /// let plugin = WolPlugin::new();
+    /// assert_eq!(plugin.packets_sent(), 0);
+    /// ```
+    pub fn packets_sent(&self) -> u64 {
+        self.packets_sent.load(Ordering::Relaxed)
+    }
+
+    /// Get the MAC address Arc for external monitoring
+    ///
+    /// Returns a clone of the internal Arc, allowing external code to
+    /// observe MAC address changes without going through the plugin.
+    pub fn get_mac_address_state(&self) -> Arc<RwLock<Option<String>>> {
+        Arc::clone(&self.mac_address)
+    }
+
+    /// Get the packets sent counter Arc for external monitoring
+    ///
+    /// Returns a clone of the internal Arc, allowing external code to
+    /// observe the packet count without going through the plugin.
+    pub fn get_packets_sent_counter(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.packets_sent)
     }
 
     /// Parse MAC address from various formats
@@ -215,9 +272,13 @@ impl WolPlugin {
             .send_to(&packet, &addr)
             .map_err(|e| ProtocolError::from_io_error(e, "Failed to send WOL packet"))?;
 
+        // Increment packets sent counter
+        self.packets_sent.fetch_add(1, Ordering::Relaxed);
+
         info!(
-            "WOL magic packet sent to {} successfully",
-            Self::format_mac_address(mac)
+            "WOL magic packet sent to {} successfully (total: {})",
+            Self::format_mac_address(mac),
+            self.packets_sent()
         );
 
         Ok(())
@@ -230,10 +291,12 @@ impl WolPlugin {
         let body = &packet.body;
 
         // Get MAC address from packet or use stored MAC
-        let mac_str = body
+        let stored_mac = self.get_mac_address();
+        let mac_str: Option<String> = body
             .get("macAddress")
             .and_then(|v| v.as_str())
-            .or(self.mac_address.as_deref());
+            .map(|s| s.to_string())
+            .or(stored_mac);
 
         let Some(mac_str) = mac_str else {
             warn!(
@@ -246,7 +309,7 @@ impl WolPlugin {
         };
 
         // Parse MAC address
-        let mac = Self::parse_mac_address(mac_str)?;
+        let mac = Self::parse_mac_address(&mac_str)?;
 
         info!(
             "Received WOL request from {} to wake {}",
@@ -292,7 +355,7 @@ impl WolPlugin {
             device.name()
         );
 
-        self.mac_address = Some(formatted);
+        self.set_mac_address(formatted);
 
         // Note: Persistence is handled by the daemon via get_mac_address()
         // The daemon should call get_mac_address() after packet handling
@@ -335,7 +398,11 @@ impl Plugin for WolPlugin {
         vec!["cconnect.wol.status".to_string()]
     }
 
-    async fn init(&mut self, device: &Device, _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>) -> Result<()> {
+    async fn init(
+        &mut self,
+        device: &Device,
+        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+    ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
         info!("WOL plugin initialized for device {}", device.name());
 
@@ -417,7 +484,8 @@ mod tests {
         let plugin = WolPlugin::new();
         assert_eq!(plugin.name(), "wol");
         assert!(plugin.enabled);
-        assert!(plugin.mac_address.is_none());
+        assert!(plugin.get_mac_address().is_none());
+        assert_eq!(plugin.packets_sent(), 0);
     }
 
     #[test]
@@ -441,7 +509,10 @@ mod tests {
         let mut plugin = WolPlugin::new();
         let device = create_test_device();
 
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         assert!(plugin.device_id.is_some());
 
         plugin.start().await.unwrap();
@@ -521,7 +592,10 @@ mod tests {
     async fn test_handle_wol_config() {
         let mut plugin = WolPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         let mut device = create_test_device();
@@ -534,7 +608,7 @@ mod tests {
 
         let result = plugin.handle_packet(&packet, &mut device).await;
         assert!(result.is_ok());
-        assert_eq!(plugin.mac_address, Some("AA:BB:CC:DD:EE:FF".to_string()));
+        assert_eq!(plugin.get_mac_address(), Some("AA:BB:CC:DD:EE:FF".to_string()));
     }
 
     #[test]
@@ -544,5 +618,66 @@ mod tests {
 
         let plugin = factory.create();
         assert_eq!(plugin.name(), "wol");
+    }
+
+    #[test]
+    fn test_mac_address_thread_safe() {
+        let plugin = WolPlugin::new();
+
+        // Initially no MAC address
+        assert!(plugin.get_mac_address().is_none());
+
+        // Set MAC address
+        plugin.set_mac_address("11:22:33:44:55:66".to_string());
+        assert_eq!(plugin.get_mac_address(), Some("11:22:33:44:55:66".to_string()));
+
+        // Update MAC address
+        plugin.set_mac_address("AA:BB:CC:DD:EE:FF".to_string());
+        assert_eq!(plugin.get_mac_address(), Some("AA:BB:CC:DD:EE:FF".to_string()));
+    }
+
+    #[test]
+    fn test_get_mac_address_state_arc() {
+        let plugin = WolPlugin::new();
+        let state = plugin.get_mac_address_state();
+
+        // Initial state is None
+        assert!(state.read().unwrap().is_none());
+
+        // Update via plugin
+        plugin.set_mac_address("00:11:22:33:44:55".to_string());
+
+        // Arc should reflect the change
+        assert_eq!(*state.read().unwrap(), Some("00:11:22:33:44:55".to_string()));
+    }
+
+    #[test]
+    fn test_packets_sent_counter() {
+        let plugin = WolPlugin::new();
+
+        // Initially zero
+        assert_eq!(plugin.packets_sent(), 0);
+
+        // Manually increment for testing
+        plugin.packets_sent.fetch_add(1, Ordering::Relaxed);
+        assert_eq!(plugin.packets_sent(), 1);
+
+        plugin.packets_sent.fetch_add(5, Ordering::Relaxed);
+        assert_eq!(plugin.packets_sent(), 6);
+    }
+
+    #[test]
+    fn test_get_packets_sent_counter_arc() {
+        let plugin = WolPlugin::new();
+        let counter = plugin.get_packets_sent_counter();
+
+        // Initial count
+        assert_eq!(counter.load(Ordering::Relaxed), 0);
+
+        // Update via plugin's counter
+        plugin.packets_sent.fetch_add(3, Ordering::Relaxed);
+
+        // Arc should reflect the change
+        assert_eq!(counter.load(Ordering::Relaxed), 3);
     }
 }
