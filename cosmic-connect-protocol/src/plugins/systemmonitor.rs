@@ -111,14 +111,103 @@
 
 use crate::{Device, Packet, Result};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 use super::{Plugin, PluginFactory};
 
+/// CPU statistics
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CpuStats {
+    /// Overall CPU usage percentage (0-100)
+    pub usage: f64,
+    /// Per-core CPU usage percentages
+    pub cores: Vec<f64>,
+}
+
+/// Memory statistics
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MemoryStats {
+    /// Total memory in bytes
+    pub total: u64,
+    /// Used memory in bytes
+    pub used: u64,
+    /// Available memory in bytes
+    pub available: u64,
+    /// Memory usage percentage
+    #[serde(rename = "usagePercent")]
+    pub usage_percent: f64,
+}
+
+/// Disk statistics for a single mount point
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiskStats {
+    /// Mount point path
+    #[serde(rename = "mountPoint")]
+    pub mount_point: String,
+    /// Total space in bytes
+    pub total: u64,
+    /// Used space in bytes
+    pub used: u64,
+    /// Available space in bytes
+    pub available: u64,
+    /// Usage percentage
+    #[serde(rename = "usagePercent")]
+    pub usage_percent: f64,
+}
+
+/// Network statistics
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NetworkStats {
+    /// Total bytes received across all interfaces
+    #[serde(rename = "bytesReceived")]
+    pub bytes_received: u64,
+    /// Total bytes sent across all interfaces
+    #[serde(rename = "bytesSent")]
+    pub bytes_sent: u64,
+}
+
+/// Process information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessInfo {
+    /// Process ID
+    pub pid: u32,
+    /// Process name
+    pub name: String,
+    /// CPU usage percentage
+    pub cpu: f64,
+    /// Memory usage in bytes
+    pub memory: u64,
+}
+
+/// Complete system statistics
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SystemStats {
+    /// CPU statistics
+    pub cpu: CpuStats,
+    /// Memory statistics
+    pub memory: MemoryStats,
+    /// Disk statistics for all mount points
+    pub disk: Vec<DiskStats>,
+    /// Network statistics
+    pub network: NetworkStats,
+    /// System uptime in seconds
+    pub uptime: u64,
+}
+
 /// System Monitor plugin for viewing remote system resources
 ///
 /// Handles `cconnect.systemmonitor.*` packets for system monitoring.
+///
+/// ## Features
+///
+/// - Real-time CPU, memory, disk, and network statistics
+/// - Process list with resource usage
+/// - Thread-safe stats caching
+/// - Public API for UI integration
 #[derive(Debug)]
 pub struct SystemMonitorPlugin {
     /// Device ID this plugin is attached to
@@ -126,6 +215,12 @@ pub struct SystemMonitorPlugin {
 
     /// Whether the plugin is enabled
     enabled: bool,
+
+    /// Cached system statistics
+    stats: Arc<RwLock<SystemStats>>,
+
+    /// Cached process list
+    processes: Arc<RwLock<Vec<ProcessInfo>>>,
 }
 
 impl SystemMonitorPlugin {
@@ -134,13 +229,97 @@ impl SystemMonitorPlugin {
         Self {
             device_id: None,
             enabled: true,
+            stats: Arc::new(RwLock::new(SystemStats::default())),
+            processes: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
+    /// Get cached system statistics
+    ///
+    /// Returns the most recently collected system stats.
+    pub fn get_stats(&self) -> SystemStats {
+        self.stats
+            .try_read()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
+    /// Get CPU statistics
+    pub fn get_cpu_stats(&self) -> CpuStats {
+        self.get_stats().cpu
+    }
+
+    /// Get memory statistics
+    pub fn get_memory_stats(&self) -> MemoryStats {
+        self.get_stats().memory
+    }
+
+    /// Get disk statistics for all mount points
+    pub fn get_disk_stats(&self) -> Vec<DiskStats> {
+        self.get_stats().disk
+    }
+
+    /// Get network statistics
+    pub fn get_network_stats(&self) -> NetworkStats {
+        self.get_stats().network
+    }
+
+    /// Get system uptime in seconds
+    pub fn get_uptime_secs(&self) -> u64 {
+        self.get_stats().uptime
+    }
+
+    /// Get cached process list
+    pub fn get_processes(&self) -> Vec<ProcessInfo> {
+        self.processes
+            .try_read()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
+    }
+
+    /// Get number of cached processes
+    pub fn process_count(&self) -> usize {
+        self.processes
+            .try_read()
+            .map(|guard| guard.len())
+            .unwrap_or(0)
+    }
+
+    /// Create a stats request packet
+    pub fn create_stats_request(&self) -> Packet {
+        Packet::new(
+            "cconnect.systemmonitor.request",
+            json!({ "requestType": "stats" }),
+        )
+    }
+
+    /// Create a process list request packet
+    pub fn create_processes_request(&self, limit: usize) -> Packet {
+        Packet::new(
+            "cconnect.systemmonitor.request",
+            json!({
+                "requestType": "processes",
+                "limit": limit
+            }),
+        )
+    }
+
+    /// Update cached stats
+    fn update_stats(&self, stats: SystemStats) {
+        if let Ok(mut guard) = self.stats.try_write() {
+            *guard = stats;
+        }
+    }
+
+    /// Update cached processes
+    fn update_processes(&self, processes: Vec<ProcessInfo>) {
+        if let Ok(mut guard) = self.processes.try_write() {
+            *guard = processes;
         }
     }
 
     /// Collect current system statistics
-    ///
-    /// Gathers CPU, memory, disk, network, and uptime information.
-    fn collect_system_stats(&self) -> Value {
+    fn collect_system_stats(&self) -> serde_json::Value {
         #[cfg(target_os = "linux")]
         {
             json!({
@@ -154,7 +333,6 @@ impl SystemMonitorPlugin {
 
         #[cfg(not(target_os = "linux"))]
         {
-            // Minimal stats for non-Linux platforms
             json!({
                 "cpu": { "usage": 0.0, "cores": [] },
                 "memory": { "total": 0, "used": 0, "available": 0, "usagePercent": 0.0 },
@@ -166,37 +344,35 @@ impl SystemMonitorPlugin {
     }
 
     #[cfg(target_os = "linux")]
-    fn get_cpu_usage(&self) -> Value {
+    fn get_cpu_usage(&self) -> serde_json::Value {
         use std::fs;
 
-        if let Ok(stat_content) = fs::read_to_string("/proc/stat") {
-            let lines: Vec<&str> = stat_content.lines().collect();
+        let Ok(stat_content) = fs::read_to_string("/proc/stat") else {
+            return json!({ "usage": 0.0, "cores": [] });
+        };
 
-            let mut cores = Vec::new();
-            let mut total_usage = 0.0;
-            let mut core_count = 0;
+        let mut cores = Vec::new();
+        let mut total_usage = 0.0;
 
-            for line in lines.iter() {
-                if line.starts_with("cpu") && !line.starts_with("cpu ") {
-                    if let Some(usage) = self.parse_cpu_line(line) {
-                        cores.push(usage);
-                        total_usage += usage;
-                        core_count += 1;
-                    }
+        for line in stat_content.lines() {
+            if line.starts_with("cpu") && !line.starts_with("cpu ") {
+                if let Some(usage) = self.parse_cpu_line(line) {
+                    cores.push(usage);
+                    total_usage += usage;
                 }
             }
-
-            if core_count > 0 {
-                total_usage /= core_count as f64;
-            }
-
-            return json!({
-                "usage": (total_usage * 100.0).round() / 100.0,
-                "cores": cores.iter().map(|u| (u * 100.0).round() / 100.0).collect::<Vec<f64>>(),
-            });
         }
 
-        json!({ "usage": 0.0, "cores": [] })
+        let avg_usage = if cores.is_empty() {
+            0.0
+        } else {
+            total_usage / cores.len() as f64
+        };
+
+        json!({
+            "usage": (avg_usage * 100.0).round() / 100.0,
+            "cores": cores.iter().map(|u| (u * 100.0).round() / 100.0).collect::<Vec<f64>>(),
+        })
     }
 
     #[cfg(target_os = "linux")]
@@ -222,134 +398,131 @@ impl SystemMonitorPlugin {
     }
 
     #[cfg(target_os = "linux")]
-    fn get_memory_info(&self) -> Value {
+    fn get_memory_info(&self) -> serde_json::Value {
         use std::fs;
 
-        if let Ok(meminfo_content) = fs::read_to_string("/proc/meminfo") {
-            let mut mem_total = 0u64;
-            let mut mem_available = 0u64;
+        let Ok(meminfo_content) = fs::read_to_string("/proc/meminfo") else {
+            return json!({ "total": 0, "used": 0, "available": 0, "usagePercent": 0.0 });
+        };
 
-            for line in meminfo_content.lines() {
-                if line.starts_with("MemTotal:") {
-                    if let Some(value) = line.split_whitespace().nth(1) {
-                        mem_total = value.parse().unwrap_or(0) * 1024;
-                    }
-                } else if line.starts_with("MemAvailable:") {
-                    if let Some(value) = line.split_whitespace().nth(1) {
-                        mem_available = value.parse().unwrap_or(0) * 1024;
-                    }
-                }
+        let mut mem_total = 0u64;
+        let mut mem_available = 0u64;
+
+        for line in meminfo_content.lines() {
+            if let Some(value) = line.strip_prefix("MemTotal:") {
+                mem_total = value.split_whitespace().next()
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(0) * 1024;
+            } else if let Some(value) = line.strip_prefix("MemAvailable:") {
+                mem_available = value.split_whitespace().next()
+                    .and_then(|v| v.parse::<u64>().ok())
+                    .unwrap_or(0) * 1024;
             }
-
-            let mem_used = mem_total.saturating_sub(mem_available);
-            let usage_percent = if mem_total > 0 {
-                (mem_used as f64 / mem_total as f64) * 100.0
-            } else {
-                0.0
-            };
-
-            return json!({
-                "total": mem_total,
-                "used": mem_used,
-                "available": mem_available,
-                "usagePercent": (usage_percent * 100.0).round() / 100.0,
-            });
         }
 
-        json!({ "total": 0, "used": 0, "available": 0, "usagePercent": 0.0 })
+        let mem_used = mem_total.saturating_sub(mem_available);
+        let usage_percent = if mem_total > 0 {
+            (mem_used as f64 / mem_total as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        json!({
+            "total": mem_total,
+            "used": mem_used,
+            "available": mem_available,
+            "usagePercent": (usage_percent * 100.0).round() / 100.0,
+        })
     }
 
     #[cfg(target_os = "linux")]
-    fn get_disk_info(&self) -> Value {
+    fn get_disk_info(&self) -> serde_json::Value {
         use std::collections::HashSet;
         use std::fs;
+
+        let Ok(mounts_content) = fs::read_to_string("/proc/mounts") else {
+            return json!([]);
+        };
 
         let mut disks = Vec::new();
         let mut seen_devices = HashSet::new();
 
-        if let Ok(mounts_content) = fs::read_to_string("/proc/mounts") {
-            for line in mounts_content.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() < 3 {
-                    continue;
-                }
-
-                let device = parts[0];
-                let mount_point = parts[1];
-                let fs_type = parts[2];
-
-                // Skip non-physical filesystems
-                if !device.starts_with("/dev/") || fs_type == "squashfs" || fs_type == "tmpfs" {
-                    continue;
-                }
-
-                if seen_devices.contains(device) {
-                    continue;
-                }
-                seen_devices.insert(device.to_string());
-
-                // Get disk usage using statvfs
-                if let Ok(stat) = nix::sys::statvfs::statvfs(mount_point) {
-                    let block_size = stat.block_size();
-                    let total = stat.blocks() * block_size;
-                    let available = stat.blocks_available() * block_size;
-                    let used = total - available;
-
-                    let usage_percent = if total > 0 {
-                        (used as f64 / total as f64) * 100.0
-                    } else {
-                        0.0
-                    };
-
-                    disks.push(json!({
-                        "mountPoint": mount_point,
-                        "total": total,
-                        "used": used,
-                        "available": available,
-                        "usagePercent": (usage_percent * 100.0).round() / 100.0,
-                    }));
-                }
+        for line in mounts_content.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 3 {
+                continue;
             }
+
+            let device = parts[0];
+            let mount_point = parts[1];
+            let fs_type = parts[2];
+
+            // Skip non-physical filesystems and duplicates
+            if !device.starts_with("/dev/") || fs_type == "squashfs" || fs_type == "tmpfs" {
+                continue;
+            }
+            if !seen_devices.insert(device.to_string()) {
+                continue;
+            }
+
+            let Ok(stat) = nix::sys::statvfs::statvfs(mount_point) else {
+                continue;
+            };
+
+            let block_size = stat.block_size();
+            let total = stat.blocks() * block_size;
+            let available = stat.blocks_available() * block_size;
+            let used = total - available;
+
+            let usage_percent = if total > 0 {
+                (used as f64 / total as f64) * 100.0
+            } else {
+                0.0
+            };
+
+            disks.push(json!({
+                "mountPoint": mount_point,
+                "total": total,
+                "used": used,
+                "available": available,
+                "usagePercent": (usage_percent * 100.0).round() / 100.0,
+            }));
         }
 
         json!(disks)
     }
 
     #[cfg(target_os = "linux")]
-    fn get_network_info(&self) -> Value {
+    fn get_network_info(&self) -> serde_json::Value {
         use std::fs;
 
-        if let Ok(netdev_content) = fs::read_to_string("/proc/net/dev") {
-            let mut total_received = 0u64;
-            let mut total_sent = 0u64;
+        let Ok(netdev_content) = fs::read_to_string("/proc/net/dev") else {
+            return json!({ "bytesReceived": 0, "bytesSent": 0 });
+        };
 
-            for line in netdev_content.lines().skip(2) {
-                if let Some((iface, stats)) = line.split_once(':') {
-                    let iface = iface.trim();
+        let mut total_received = 0u64;
+        let mut total_sent = 0u64;
 
-                    if iface == "lo" {
-                        continue;
-                    }
+        for line in netdev_content.lines().skip(2) {
+            let Some((iface, stats)) = line.split_once(':') else {
+                continue;
+            };
 
-                    let parts: Vec<&str> = stats.split_whitespace().collect();
-                    if parts.len() >= 9 {
-                        if let Ok(rx) = parts[0].parse::<u64>() {
-                            total_received += rx;
-                        }
-                        if let Ok(tx) = parts[8].parse::<u64>() {
-                            total_sent += tx;
-                        }
-                    }
-                }
+            if iface.trim() == "lo" {
+                continue;
             }
 
-            return json!({
-                "bytesReceived": total_received,
-                "bytesSent": total_sent,
-            });
+            let parts: Vec<&str> = stats.split_whitespace().collect();
+            if parts.len() >= 9 {
+                total_received += parts[0].parse::<u64>().unwrap_or(0);
+                total_sent += parts[8].parse::<u64>().unwrap_or(0);
+            }
         }
 
-        json!({ "bytesReceived": 0, "bytesSent": 0 })
+        json!({
+            "bytesReceived": total_received,
+            "bytesSent": total_sent,
+        })
     }
 
     #[cfg(target_os = "linux")]
@@ -367,32 +540,29 @@ impl SystemMonitorPlugin {
     }
 
     /// Collect top processes by resource usage
-    fn collect_process_list(&self, limit: usize) -> Value {
+    fn collect_process_list(&self, limit: usize) -> serde_json::Value {
         #[cfg(target_os = "linux")]
         {
             use std::fs;
 
-            let mut processes = Vec::new();
+            let Ok(entries) = fs::read_dir("/proc") else {
+                return json!({ "processes": [] });
+            };
 
-            if let Ok(entries) = fs::read_dir("/proc") {
-                for entry in entries.flatten() {
-                    if let Ok(file_name) = entry.file_name().into_string() {
-                        if let Ok(pid) = file_name.parse::<u32>() {
-                            if let Some(process_info) = self.get_process_info(pid) {
-                                processes.push(process_info);
-                            }
-                        }
-                    }
-                }
-            }
+            let mut processes: Vec<_> = entries
+                .flatten()
+                .filter_map(|entry| {
+                    let file_name = entry.file_name().into_string().ok()?;
+                    let pid = file_name.parse::<u32>().ok()?;
+                    self.get_process_info(pid)
+                })
+                .collect();
 
             // Sort by CPU usage (descending)
             processes.sort_by(|a, b| {
                 let cpu_a = a["cpu"].as_f64().unwrap_or(0.0);
                 let cpu_b = b["cpu"].as_f64().unwrap_or(0.0);
-                cpu_b
-                    .partial_cmp(&cpu_a)
-                    .unwrap_or(std::cmp::Ordering::Equal)
+                cpu_b.partial_cmp(&cpu_a).unwrap_or(std::cmp::Ordering::Equal)
             });
 
             processes.truncate(limit);
@@ -402,16 +572,16 @@ impl SystemMonitorPlugin {
 
         #[cfg(not(target_os = "linux"))]
         {
+            let _ = limit;
             json!({ "processes": [] })
         }
     }
 
     #[cfg(target_os = "linux")]
-    fn get_process_info(&self, pid: u32) -> Option<Value> {
+    fn get_process_info(&self, pid: u32) -> Option<serde_json::Value> {
         use std::fs;
 
-        let stat_path = format!("/proc/{}/stat", pid);
-        let stat_content = fs::read_to_string(&stat_path).ok()?;
+        let stat_content = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
 
         let start = stat_content.find('(')?;
         let end = stat_content.rfind(')')?;
@@ -420,22 +590,18 @@ impl SystemMonitorPlugin {
         let stats_part = &stat_content[end + 2..];
         let parts: Vec<&str> = stats_part.split_whitespace().collect();
 
-        let statm_path = format!("/proc/{}/statm", pid);
-        let memory = if let Ok(statm_content) = fs::read_to_string(&statm_path) {
-            if let Some(rss) = statm_content.split_whitespace().nth(1) {
-                rss.parse::<u64>().unwrap_or(0) * 4096
-            } else {
-                0
-            }
-        } else {
-            0
-        };
+        let memory = fs::read_to_string(format!("/proc/{pid}/statm"))
+            .ok()
+            .and_then(|content| {
+                content.split_whitespace().nth(1)?
+                    .parse::<u64>().ok()
+                    .map(|rss| rss * 4096)
+            })
+            .unwrap_or(0);
 
         let utime: u64 = parts.get(11)?.parse().ok()?;
         let stime: u64 = parts.get(12)?.parse().ok()?;
-        let total_time = utime + stime;
-
-        let cpu_percent = (total_time as f64 / 1000.0).min(100.0);
+        let cpu_percent = ((utime + stime) as f64 / 1000.0).min(100.0);
 
         Some(json!({
             "pid": pid,
@@ -449,8 +615,7 @@ impl SystemMonitorPlugin {
     async fn handle_request(&mut self, packet: &Packet, device: &Device) -> Result<()> {
         debug!("Handling system monitor request from {}", device.name());
 
-        let body = &packet.body;
-        let request_type = body
+        let request_type = packet.body
             .get("requestType")
             .and_then(|v| v.as_str())
             .unwrap_or("stats");
@@ -458,36 +623,36 @@ impl SystemMonitorPlugin {
         match request_type {
             "stats" => {
                 info!("Collecting system statistics for {}", device.name());
-                let stats = self.collect_system_stats();
+                let stats_json = self.collect_system_stats();
 
-                // Create response packet
-                let response = Packet::new("cconnect.systemmonitor.stats", stats);
-                debug!(
-                    "System stats collected for {}: {:?}",
-                    device.name(),
-                    response.body
-                );
+                if let Ok(stats) = serde_json::from_value::<SystemStats>(stats_json.clone()) {
+                    self.update_stats(stats);
+                }
 
-                // In a real implementation, send the response packet through the device connection
-                // device.send_packet(response).await?;
+                let response = Packet::new("cconnect.systemmonitor.stats", stats_json);
+                debug!("System stats collected for {}: {:?}", device.name(), response.body);
+                // TODO: Send response packet through device connection
             }
             "processes" => {
-                let limit = body.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+                let limit = packet.body.get("limit")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(10) as usize;
 
                 info!("Collecting top {} processes for {}", limit, device.name());
                 let process_list = self.collect_process_list(limit);
 
-                let response = Packet::new("cconnect.systemmonitor.processes", process_list);
-                debug!(
-                    "Process list collected for {}: {:?}",
-                    device.name(),
-                    response.body
-                );
+                if let Some(processes_array) = process_list.get("processes") {
+                    if let Ok(processes) = serde_json::from_value::<Vec<ProcessInfo>>(processes_array.clone()) {
+                        self.update_processes(processes);
+                    }
+                }
 
-                // device.send_packet(response).await?;
+                let response = Packet::new("cconnect.systemmonitor.processes", process_list);
+                debug!("Process list collected for {}: {:?}", device.name(), response.body);
+                // TODO: Send response packet through device connection
             }
             _ => {
-                warn!("Unknown request type: {}", request_type);
+                warn!("Unknown system monitor request type: {}", request_type);
             }
         }
 
@@ -529,7 +694,11 @@ impl Plugin for SystemMonitorPlugin {
         ]
     }
 
-    async fn init(&mut self, device: &Device, _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>) -> Result<()> {
+    async fn init(
+        &mut self,
+        device: &Device,
+        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+    ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
         info!(
             "SystemMonitor plugin initialized for device {}",
@@ -629,7 +798,10 @@ mod tests {
         let mut plugin = SystemMonitorPlugin::new();
         let device = create_test_device();
 
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         assert!(plugin.device_id.is_some());
 
         plugin.start().await.unwrap();
@@ -643,7 +815,10 @@ mod tests {
     async fn test_handle_stats_request() {
         let mut plugin = SystemMonitorPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         let mut device = create_test_device();
@@ -662,7 +837,10 @@ mod tests {
     async fn test_handle_processes_request() {
         let mut plugin = SystemMonitorPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         let mut device = create_test_device();
@@ -708,5 +886,202 @@ mod tests {
 
         let plugin = factory.create();
         assert_eq!(plugin.name(), "systemmonitor");
+    }
+
+    #[test]
+    fn test_initial_stats_empty() {
+        let plugin = SystemMonitorPlugin::new();
+
+        let stats = plugin.get_stats();
+        assert_eq!(stats.cpu.usage, 0.0);
+        assert!(stats.cpu.cores.is_empty());
+        assert_eq!(stats.memory.total, 0);
+        assert!(stats.disk.is_empty());
+        assert_eq!(stats.network.bytes_received, 0);
+        assert_eq!(stats.uptime, 0);
+    }
+
+    #[test]
+    fn test_get_cpu_stats() {
+        let plugin = SystemMonitorPlugin::new();
+        let cpu = plugin.get_cpu_stats();
+        assert_eq!(cpu.usage, 0.0);
+        assert!(cpu.cores.is_empty());
+    }
+
+    #[test]
+    fn test_get_memory_stats() {
+        let plugin = SystemMonitorPlugin::new();
+        let memory = plugin.get_memory_stats();
+        assert_eq!(memory.total, 0);
+        assert_eq!(memory.used, 0);
+        assert_eq!(memory.available, 0);
+        assert_eq!(memory.usage_percent, 0.0);
+    }
+
+    #[test]
+    fn test_get_disk_stats() {
+        let plugin = SystemMonitorPlugin::new();
+        let disks = plugin.get_disk_stats();
+        assert!(disks.is_empty());
+    }
+
+    #[test]
+    fn test_get_network_stats() {
+        let plugin = SystemMonitorPlugin::new();
+        let network = plugin.get_network_stats();
+        assert_eq!(network.bytes_received, 0);
+        assert_eq!(network.bytes_sent, 0);
+    }
+
+    #[test]
+    fn test_get_uptime() {
+        let plugin = SystemMonitorPlugin::new();
+        assert_eq!(plugin.get_uptime_secs(), 0);
+    }
+
+    #[test]
+    fn test_get_processes_empty() {
+        let plugin = SystemMonitorPlugin::new();
+        let processes = plugin.get_processes();
+        assert!(processes.is_empty());
+        assert_eq!(plugin.process_count(), 0);
+    }
+
+    #[test]
+    fn test_update_stats() {
+        let plugin = SystemMonitorPlugin::new();
+
+        let stats = SystemStats {
+            cpu: CpuStats {
+                usage: 45.5,
+                cores: vec![40.0, 50.0, 45.0, 47.0],
+            },
+            memory: MemoryStats {
+                total: 16_000_000_000,
+                used: 8_000_000_000,
+                available: 8_000_000_000,
+                usage_percent: 50.0,
+            },
+            disk: vec![DiskStats {
+                mount_point: "/".to_string(),
+                total: 500_000_000_000,
+                used: 250_000_000_000,
+                available: 250_000_000_000,
+                usage_percent: 50.0,
+            }],
+            network: NetworkStats {
+                bytes_received: 1_000_000,
+                bytes_sent: 500_000,
+            },
+            uptime: 86400,
+        };
+
+        plugin.update_stats(stats);
+
+        let cached = plugin.get_stats();
+        assert_eq!(cached.cpu.usage, 45.5);
+        assert_eq!(cached.cpu.cores.len(), 4);
+        assert_eq!(cached.memory.total, 16_000_000_000);
+        assert_eq!(cached.disk.len(), 1);
+        assert_eq!(cached.disk[0].mount_point, "/");
+        assert_eq!(cached.network.bytes_received, 1_000_000);
+        assert_eq!(cached.uptime, 86400);
+    }
+
+    #[test]
+    fn test_update_processes() {
+        let plugin = SystemMonitorPlugin::new();
+
+        let processes = vec![
+            ProcessInfo {
+                pid: 1234,
+                name: "firefox".to_string(),
+                cpu: 12.5,
+                memory: 1_000_000_000,
+            },
+            ProcessInfo {
+                pid: 5678,
+                name: "code".to_string(),
+                cpu: 8.3,
+                memory: 500_000_000,
+            },
+        ];
+
+        plugin.update_processes(processes);
+
+        let cached = plugin.get_processes();
+        assert_eq!(cached.len(), 2);
+        assert_eq!(cached[0].pid, 1234);
+        assert_eq!(cached[0].name, "firefox");
+        assert_eq!(cached[1].pid, 5678);
+        assert_eq!(plugin.process_count(), 2);
+    }
+
+    #[test]
+    fn test_create_stats_request() {
+        let plugin = SystemMonitorPlugin::new();
+        let packet = plugin.create_stats_request();
+
+        assert_eq!(packet.packet_type, "cconnect.systemmonitor.request");
+        assert_eq!(
+            packet.body.get("requestType").and_then(|v| v.as_str()),
+            Some("stats")
+        );
+    }
+
+    #[test]
+    fn test_create_processes_request() {
+        let plugin = SystemMonitorPlugin::new();
+        let packet = plugin.create_processes_request(25);
+
+        assert_eq!(packet.packet_type, "cconnect.systemmonitor.request");
+        assert_eq!(
+            packet.body.get("requestType").and_then(|v| v.as_str()),
+            Some("processes")
+        );
+        assert_eq!(packet.body.get("limit").and_then(|v| v.as_u64()), Some(25));
+    }
+
+    #[test]
+    fn test_cpu_stats_serialization() {
+        let cpu = CpuStats {
+            usage: 45.5,
+            cores: vec![40.0, 50.0],
+        };
+
+        let json = serde_json::to_value(&cpu).unwrap();
+        assert_eq!(json["usage"], 45.5);
+        assert_eq!(json["cores"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_memory_stats_serialization() {
+        let memory = MemoryStats {
+            total: 16_000_000_000,
+            used: 8_000_000_000,
+            available: 8_000_000_000,
+            usage_percent: 50.0,
+        };
+
+        let json = serde_json::to_value(&memory).unwrap();
+        assert_eq!(json["total"], 16_000_000_000u64);
+        assert_eq!(json["usagePercent"], 50.0);
+    }
+
+    #[test]
+    fn test_process_info_serialization() {
+        let process = ProcessInfo {
+            pid: 1234,
+            name: "test".to_string(),
+            cpu: 10.5,
+            memory: 1_000_000,
+        };
+
+        let json = serde_json::to_value(&process).unwrap();
+        assert_eq!(json["pid"], 1234);
+        assert_eq!(json["name"], "test");
+        assert_eq!(json["cpu"], 10.5);
+        assert_eq!(json["memory"], 1_000_000);
     }
 }
