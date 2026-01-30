@@ -115,6 +115,7 @@ pub mod findmyphone;
 pub mod lock;
 pub mod logind_backend;
 pub mod r#macro;
+pub mod mkshare;
 pub mod mousekeyboardshare;
 pub mod mpris;
 pub mod mpris_backend;
@@ -131,9 +132,9 @@ pub mod screenshot;
 pub mod share;
 pub mod systemd_inhibitor;
 pub mod systemmonitor;
-pub mod upower_backend;
 pub mod systemvolume;
 pub mod telephony;
+pub mod upower_backend;
 pub mod wol;
 
 use crate::{Device, Packet, ProtocolError, Result};
@@ -667,7 +668,10 @@ impl PluginManager {
             // Auto-alias kdeconnect.* to cconnect.* if not handled
             let aliased = packet_type.replace("kdeconnect.", "cconnect.");
             if let Some(name) = self.capability_map.get(&aliased) {
-                debug!("Aliasing packet type {} to {} for routing", packet_type, aliased);
+                debug!(
+                    "Aliasing packet type {} to {} for routing",
+                    packet_type, aliased
+                );
                 packet_type = aliased;
                 name.clone()
             } else {
