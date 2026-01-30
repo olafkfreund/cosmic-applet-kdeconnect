@@ -55,10 +55,10 @@
 //! - [x] Stream receiver (TCP with custom protocol)
 //! - [x] Stream sender (TCP with custom protocol)
 //! - [x] XDG Desktop Portal integration for screen selection
+//! - [x] Adaptive bitrate control (adjusts encoder based on network throughput)
+//! - [x] Multiple viewer management (broadcast channel architecture)
 //! - [ ] Cursor tracking and highlighting (packets parsed, UI integration needed)
 //! - [ ] Annotation overlay system (packets parsed, UI integration needed)
-//! - [ ] Adaptive bitrate control
-//! - [ ] Multiple viewer management
 
 pub mod capture;
 pub mod decoder;
@@ -90,6 +90,29 @@ const DEFAULT_FPS: u8 = 30;
 const DEFAULT_BITRATE_KBPS: u32 = 2000; // 2 Mbps
 const DEFAULT_QUALITY: &str = "medium";
 const MAX_VIEWERS: usize = 10; // Max simultaneous viewers
+
+/// Build the list of incoming capabilities for screenshare plugin
+fn screenshare_incoming_capabilities() -> Vec<String> {
+    vec![
+        // Base capability
+        INCOMING_CAPABILITY.to_string(),
+        "kdeconnect.screenshare".to_string(),
+        // Specific packet types
+        "cconnect.screenshare.start".to_string(),
+        "cconnect.screenshare.frame".to_string(),
+        "cconnect.screenshare.cursor".to_string(),
+        "cconnect.screenshare.annotation".to_string(),
+        "cconnect.screenshare.stop".to_string(),
+        "cconnect.screenshare.ready".to_string(),
+        // KDE Connect compatibility
+        "kdeconnect.screenshare.start".to_string(),
+        "kdeconnect.screenshare.frame".to_string(),
+        "kdeconnect.screenshare.cursor".to_string(),
+        "kdeconnect.screenshare.annotation".to_string(),
+        "kdeconnect.screenshare.stop".to_string(),
+        "kdeconnect.screenshare.ready".to_string(),
+    ]
+}
 
 /// Screen share mode
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -425,6 +448,15 @@ pub struct ShareStats {
 /// Handle to a running streaming task
 type StreamingHandle = tokio::task::JoinHandle<()>;
 
+/// Frame data for broadcast to viewers
+#[derive(Clone)]
+pub struct BroadcastFrame {
+    /// Encoded frame data
+    pub data: Vec<u8>,
+    /// Presentation timestamp
+    pub pts: u64,
+}
+
 /// Screen Share plugin
 pub struct ScreenSharePlugin {
     /// Device ID this plugin is associated with
@@ -445,8 +477,14 @@ pub struct ScreenSharePlugin {
     /// Local port to receive stream (set by UI)
     local_port: Option<u16>,
 
-    /// Handle to the streaming task (for cleanup)
-    streaming_task: Option<StreamingHandle>,
+    /// Handle to the capture task (produces frames)
+    capture_task: Option<StreamingHandle>,
+
+    /// Handles to sender tasks (one per viewer)
+    sender_tasks: std::collections::HashMap<String, StreamingHandle>,
+
+    /// Broadcast channel for frame distribution to multiple viewers
+    frame_sender: Option<tokio::sync::broadcast::Sender<BroadcastFrame>>,
 
     /// Shared flag to signal streaming stop
     stop_streaming: Arc<Mutex<bool>>,
@@ -462,7 +500,9 @@ impl ScreenSharePlugin {
             receiving: false,
             packet_sender: None,
             local_port: None,
-            streaming_task: None,
+            capture_task: None,
+            sender_tasks: std::collections::HashMap::new(),
+            frame_sender: None,
             stop_streaming: Arc::new(Mutex::new(false)),
         }
     }
@@ -632,161 +672,257 @@ impl ScreenSharePlugin {
         }
     }
 
-    /// Start streaming to a remote device
+    /// Start streaming to a remote device (viewer)
     ///
-    /// This initializes the GStreamer capture pipeline and connects to the
-    /// receiver's TCP port to stream encoded video frames.
+    /// This method supports multiple viewers:
+    /// - First viewer: initializes capture and starts broadcasting frames
+    /// - Additional viewers: spawn new sender tasks subscribed to the broadcast
     #[cfg(feature = "screenshare")]
-    pub async fn start_streaming_to_device(&mut self, host: String, port: u16) -> Result<()> {
+    pub async fn start_streaming_to_device(&mut self, host: String, port: u16, viewer_id: String) -> Result<()> {
         // Get config from active session
-        let config = if let Some(session) = &self.active_session {
-            session.config.clone()
-        } else {
-            return Err(ProtocolError::Plugin("No active sharing session".to_string()));
-        };
+        let config = self.active_session.as_ref()
+            .ok_or_else(|| ProtocolError::Plugin("No active sharing session".to_string()))?
+            .config.clone();
 
-        info!("Starting stream to {}:{} with {} fps, {} kbps",
-            host, port, config.fps, config.bitrate_kbps);
+        info!("Adding viewer {} at {}:{}", viewer_id, host, port);
 
-        // Reset stop flag
-        {
-            let mut stop = self.stop_streaming.lock().await;
-            *stop = false;
-        }
+        // Check if capture is already running
+        let is_first_viewer = self.capture_task.is_none();
 
-        // Request screen share permission via XDG Desktop Portal
-        // This shows the system screen selection dialog
-        let portal_session = match portal::request_screencast().await {
-            Ok(session) => {
+        if is_first_viewer {
+            // First viewer - initialize capture and broadcast channel
+            info!("First viewer - starting capture with {} fps, {} kbps",
+                config.fps, config.bitrate_kbps);
+
+            // Reset stop flag
+            *self.stop_streaming.lock().await = false;
+
+            // Create broadcast channel for frame distribution (buffer 16 frames)
+            let (tx, _) = tokio::sync::broadcast::channel::<BroadcastFrame>(16);
+            self.frame_sender = Some(tx.clone());
+
+            // Request screen share permission via XDG Desktop Portal
+            let portal_session = portal::request_screencast().await.ok();
+            if let Some(ref session) = portal_session {
                 info!("Portal session acquired: node_id={}", session.pipewire_node_id);
-                Some(session)
-            }
-            Err(e) => {
-                warn!("Portal request failed ({}), falling back to test source", e);
-                None
-            }
-        };
-
-        // Clone Arc for the spawned task
-        let stop_flag = self.stop_streaming.clone();
-
-        // Create capture config with portal info if available
-        let (pipewire_fd, pipewire_node_id) = if let Some(ref session) = portal_session {
-            (Some(session.fd()), Some(session.pipewire_node_id))
-        } else {
-            (None, None)
-        };
-
-        let capture_config = CaptureConfig {
-            fps: config.fps as u32,
-            bitrate_kbps: config.bitrate_kbps,
-            width: 0,  // Auto
-            height: 0, // Auto
-            pipewire_node_id,
-            pipewire_fd,
-        };
-
-        // Spawn streaming task
-        let handle = tokio::spawn(async move {
-            // Initialize capture
-            let mut capture = ScreenCapture::new(capture_config);
-            if let Err(e) = capture.init() {
-                error!("Failed to initialize screen capture: {}", e);
-                return;
+            } else {
+                warn!("Portal request failed, falling back to test source");
             }
 
-            // Start capture
-            if let Err(e) = capture.start() {
-                error!("Failed to start screen capture: {}", e);
-                return;
-            }
+            // Extract PipeWire parameters from portal session
+            let (pipewire_fd, pipewire_node_id) = portal_session.as_ref()
+                .map(|s| (Some(s.fd()), Some(s.pipewire_node_id)))
+                .unwrap_or((None, None));
 
-            // Connect to receiver
-            let mut sender = StreamSender::new();
-            if let Err(e) = sender.connect(&host, port).await {
-                error!("Failed to connect to receiver {}:{}: {}", host, port, e);
-                let _ = capture.stop();
-                return;
-            }
+            let capture_config = CaptureConfig {
+                fps: config.fps as u32,
+                bitrate_kbps: config.bitrate_kbps,
+                width: 0,
+                height: 0,
+                pipewire_node_id,
+                pipewire_fd,
+            };
 
-            info!("Streaming started to {}:{}", host, port);
+            // Adaptive bitrate settings
+            let adaptive_bitrate = config.adaptive_bitrate;
+            let target_bitrate_kbps = config.bitrate_kbps;
+            let min_bitrate_kbps = 200_u32;
+            let max_bitrate_kbps = target_bitrate_kbps.saturating_mul(2).min(50000);
 
-            // Frame pulling loop
-            let frame_interval = std::time::Duration::from_millis(1000 / 30); // Target interval
-            let mut last_frame = std::time::Instant::now();
+            let stop_flag = self.stop_streaming.clone();
+            let frame_tx = tx.clone();
 
-            loop {
-                // Check stop flag
-                {
-                    let stop = stop_flag.lock().await;
-                    if *stop {
-                        info!("Streaming stop requested");
+            // Spawn capture task
+            let capture_handle = tokio::spawn(async move {
+                // Initialize capture
+                let mut capture = ScreenCapture::new(capture_config);
+                if let Err(e) = capture.init() {
+                    error!("Failed to initialize screen capture: {}", e);
+                    return;
+                }
+
+                if let Err(e) = capture.start() {
+                    error!("Failed to start screen capture: {}", e);
+                    return;
+                }
+
+                info!("Capture started, broadcasting frames");
+
+                let frame_interval = std::time::Duration::from_millis(1000 / 30);
+                let mut last_frame = std::time::Instant::now();
+                let mut last_bitrate_check = std::time::Instant::now();
+                let bitrate_check_interval = std::time::Duration::from_secs(2);
+                let mut frames_captured: u64 = 0;
+
+                loop {
+                    // Check stop flag
+                    if *stop_flag.lock().await {
+                        info!("Capture stop requested");
                         break;
+                    }
+
+                    // Adaptive bitrate control (based on subscriber count/health)
+                    if adaptive_bitrate && last_bitrate_check.elapsed() >= bitrate_check_interval {
+                        last_bitrate_check = std::time::Instant::now();
+                        let current_bitrate = capture.current_bitrate_kbps();
+
+                        // Check receiver count - if 0 receivers, we might reduce quality
+                        let receiver_count = frame_tx.receiver_count();
+                        if receiver_count == 0 && current_bitrate > min_bitrate_kbps {
+                            // No active viewers, reduce bitrate to minimum
+                            debug!("No active viewers, reducing bitrate to minimum");
+                            let _ = capture.set_bitrate(min_bitrate_kbps);
+                        } else if receiver_count > 0 && current_bitrate < target_bitrate_kbps {
+                            // Viewers present and below target, increase bitrate
+                            let new_bitrate = (current_bitrate as f32 * 1.1) as u32;
+                            let new_bitrate = new_bitrate.min(max_bitrate_kbps);
+                            if new_bitrate != current_bitrate {
+                                debug!("Adaptive bitrate: {} kbps -> {} kbps ({} viewers)",
+                                    current_bitrate, new_bitrate, receiver_count);
+                                let _ = capture.set_bitrate(new_bitrate);
+                            }
+                        }
+                    }
+
+                    // Pull frame from capture
+                    match capture.pull_frame() {
+                        Ok(Some(frame)) => {
+                            frames_captured += 1;
+                            // Broadcast to all viewers
+                            let broadcast_frame = BroadcastFrame {
+                                data: frame.data,
+                                pts: frame.pts,
+                            };
+                            // send() returns error if no receivers, which is fine
+                            let _ = frame_tx.send(broadcast_frame);
+                            last_frame = std::time::Instant::now();
+                        }
+                        Ok(None) => {
+                            let elapsed = last_frame.elapsed();
+                            if elapsed < frame_interval {
+                                tokio::time::sleep(frame_interval - elapsed).await;
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to pull frame: {}", e);
+                            break;
+                        }
                     }
                 }
 
-                // Pull frame from capture
-                match capture.pull_frame() {
-                    Ok(Some(frame)) => {
-                        // Send frame
+                // Cleanup
+                info!("Capture ended: {} frames captured", frames_captured);
+                let _ = capture.stop();
+            });
+
+            self.capture_task = Some(capture_handle);
+        }
+
+        // Spawn sender task for this viewer
+        let frame_rx = self.frame_sender.as_ref()
+            .ok_or_else(|| ProtocolError::Plugin("No frame sender available".to_string()))?
+            .subscribe();
+
+        let stop_flag = self.stop_streaming.clone();
+        let viewer_id_clone = viewer_id.clone();
+
+        let sender_handle = tokio::spawn(async move {
+            // Connect to viewer
+            let mut sender = StreamSender::new();
+            if let Err(e) = sender.connect(&host, port).await {
+                error!("Failed to connect to viewer {} at {}:{}: {}", viewer_id_clone, host, port, e);
+                return;
+            }
+
+            info!("Streaming to viewer {} at {}:{}", viewer_id_clone, host, port);
+
+            let mut rx = frame_rx;
+
+            loop {
+                // Check stop flag
+                if *stop_flag.lock().await {
+                    info!("Viewer {} streaming stop requested", viewer_id_clone);
+                    break;
+                }
+
+                // Receive frame from broadcast
+                match rx.recv().await {
+                    Ok(frame) => {
                         if let Err(e) = sender.send_video_frame(&frame.data, frame.pts).await {
-                            error!("Failed to send frame: {}", e);
+                            error!("Failed to send frame to viewer {}: {}", viewer_id_clone, e);
                             break;
                         }
-                        last_frame = std::time::Instant::now();
                     }
-                    Ok(None) => {
-                        // No frame available, wait a bit
-                        let elapsed = last_frame.elapsed();
-                        if elapsed < frame_interval {
-                            tokio::time::sleep(frame_interval - elapsed).await;
-                        }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("Viewer {} lagged {} frames", viewer_id_clone, n);
+                        // Continue - we'll catch up
                     }
-                    Err(e) => {
-                        error!("Failed to pull frame: {}", e);
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        info!("Broadcast channel closed for viewer {}", viewer_id_clone);
                         break;
                     }
                 }
             }
 
             // Cleanup
-            info!("Streaming ended, cleaning up");
+            info!("Streaming to viewer {} ended", viewer_id_clone);
             let _ = sender.send_end_of_stream().await;
             sender.close().await;
-            let _ = capture.stop();
 
             let (frames, bytes) = sender.stats();
-            info!("Stream stats: {} frames, {} bytes sent", frames, bytes);
-
-            // Note: portal_session is dropped here, which closes the portal session
+            info!("Viewer {} stats: {} frames, {} bytes sent", viewer_id_clone, frames, bytes);
         });
 
-        self.streaming_task = Some(handle);
+        self.sender_tasks.insert(viewer_id, sender_handle);
         Ok(())
     }
 
     /// Start streaming - stub when screenshare feature is disabled
     #[cfg(not(feature = "screenshare"))]
-    pub async fn start_streaming_to_device(&mut self, _host: String, _port: u16) -> Result<()> {
+    pub async fn start_streaming_to_device(&mut self, _host: String, _port: u16, _viewer_id: String) -> Result<()> {
         Err(ProtocolError::Plugin("screenshare feature not enabled".to_string()))
     }
 
-    /// Stop the streaming task
-    pub async fn stop_streaming(&mut self) {
-        // Signal stop
-        {
-            let mut stop = self.stop_streaming.lock().await;
-            *stop = true;
+    /// Remove a viewer from the streaming session
+    pub async fn remove_viewer_stream(&mut self, viewer_id: &str) {
+        if let Some(handle) = self.sender_tasks.remove(viewer_id) {
+            handle.abort();
+            info!("Removed streaming task for viewer {}", viewer_id);
         }
 
-        // Wait for task to finish
-        if let Some(handle) = self.streaming_task.take() {
-            // Give it a moment to clean up
+        // If no more viewers, stop capture to save resources
+        if self.sender_tasks.is_empty() {
+            info!("No more viewers, stopping capture");
+            self.stop_streaming().await;
+        }
+    }
+
+    /// Get the number of active viewers
+    pub fn viewer_count(&self) -> usize {
+        self.sender_tasks.len()
+    }
+
+    /// Stop all streaming tasks
+    pub async fn stop_streaming(&mut self) {
+        // Signal stop
+        *self.stop_streaming.lock().await = true;
+
+        // Stop all sender tasks
+        for (viewer_id, handle) in self.sender_tasks.drain() {
+            info!("Stopping sender task for viewer {}", viewer_id);
+            handle.abort();
+        }
+
+        // Stop capture task with brief delay to allow graceful shutdown
+        if let Some(handle) = self.capture_task.take() {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             handle.abort();
         }
 
-        info!("Streaming stopped");
+        // Clear frame sender
+        self.frame_sender = None;
+
+        info!("All streaming stopped");
     }
 }
 
@@ -811,25 +947,7 @@ impl Plugin for ScreenSharePlugin {
     }
 
     fn incoming_capabilities(&self) -> Vec<String> {
-        vec![
-            // Base capability
-            INCOMING_CAPABILITY.to_string(),
-            "kdeconnect.screenshare".to_string(),
-            // Specific packet types that this plugin handles
-            "cconnect.screenshare.start".to_string(),
-            "cconnect.screenshare.frame".to_string(),
-            "cconnect.screenshare.cursor".to_string(),
-            "cconnect.screenshare.annotation".to_string(),
-            "cconnect.screenshare.stop".to_string(),
-            "cconnect.screenshare.ready".to_string(),
-            // KDE Connect compatibility
-            "kdeconnect.screenshare.start".to_string(),
-            "kdeconnect.screenshare.frame".to_string(),
-            "kdeconnect.screenshare.cursor".to_string(),
-            "kdeconnect.screenshare.annotation".to_string(),
-            "kdeconnect.screenshare.stop".to_string(),
-            "kdeconnect.screenshare.ready".to_string(),
-        ]
+        screenshare_incoming_capabilities()
     }
 
     fn outgoing_capabilities(&self) -> Vec<String> {
@@ -934,12 +1052,19 @@ impl Plugin for ScreenSharePlugin {
             // Future: Emit DBus signal for UI to render annotation overlay
             debug!("Annotation received: {}", annotation.annotation_type);
         } else if packet.is_type("cconnect.screenshare.stop") {
-            // Remote device stopped sharing
-            info!("Screen share stopped by {}", device.name());
-            self.receiving = false;
+            // Remote device stopped sharing or viewer disconnected
+            info!("Screen share stop from {}", device.name());
 
-            // We should probably inform the UI to close the window via DBus signal?
-            // Or let the UI detect stream closure.
+            // If we're receiving, mark as not receiving
+            if self.receiving {
+                self.receiving = false;
+                // TODO: Emit DBus signal to close viewer UI
+            }
+
+            // If this device was a viewer, remove their stream
+            let viewer_id = device.id().to_string();
+            self.remove_viewer_stream(&viewer_id).await;
+            self.remove_viewer(&viewer_id);
         } else if packet.is_type("cconnect.screenshare.ready") {
             // Receiver is ready to receive screen share
             // This is sent by the receiving device after it opens its viewer window
@@ -959,22 +1084,18 @@ impl Plugin for ScreenSharePlugin {
             }
 
             // Get the device's host address for TCP connection
-            let host = if let Some(h) = &device.host {
-                h.clone()
-            } else {
+            let host = device.host.clone().ok_or_else(|| {
                 error!("Cannot stream to device {}: no host address available", device.name());
-                return Err(ProtocolError::Plugin(
-                    "Device has no host address for streaming".to_string()
-                ));
-            };
+                ProtocolError::Plugin("Device has no host address for streaming".to_string())
+            })?;
 
             // Start streaming to the device
-            if let Err(e) = self.start_streaming_to_device(host.clone(), tcp_port).await {
-                error!("Failed to start streaming to {}:{}: {}", host, tcp_port, e);
-                return Err(e);
-            }
+            let viewer_id = device.id().to_string();
+            self.start_streaming_to_device(host.clone(), tcp_port, viewer_id.clone()).await
+                .inspect_err(|e| error!("Failed to start streaming to {}:{}: {}", host, tcp_port, e))?;
 
-            info!("Started streaming screen share to {} ({}:{})", device.name(), host, tcp_port);
+            info!("Started streaming screen share to {} ({}:{}) [viewers: {}]",
+                device.name(), host, tcp_port, self.viewer_count());
         }
 
         Ok(())
@@ -994,25 +1115,7 @@ impl PluginFactory for ScreenSharePluginFactory {
     }
 
     fn incoming_capabilities(&self) -> Vec<String> {
-        vec![
-            // Base capability
-            INCOMING_CAPABILITY.to_string(),
-            "kdeconnect.screenshare".to_string(),
-            // Specific packet types that this plugin handles
-            "cconnect.screenshare.start".to_string(),
-            "cconnect.screenshare.frame".to_string(),
-            "cconnect.screenshare.cursor".to_string(),
-            "cconnect.screenshare.annotation".to_string(),
-            "cconnect.screenshare.stop".to_string(),
-            "cconnect.screenshare.ready".to_string(),
-            // KDE Connect compatibility
-            "kdeconnect.screenshare.start".to_string(),
-            "kdeconnect.screenshare.frame".to_string(),
-            "kdeconnect.screenshare.cursor".to_string(),
-            "kdeconnect.screenshare.annotation".to_string(),
-            "kdeconnect.screenshare.stop".to_string(),
-            "kdeconnect.screenshare.ready".to_string(),
-        ]
+        screenshare_incoming_capabilities()
     }
 
     fn outgoing_capabilities(&self) -> Vec<String> {

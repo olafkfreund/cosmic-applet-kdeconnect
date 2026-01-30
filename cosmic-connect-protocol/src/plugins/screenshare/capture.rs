@@ -66,19 +66,24 @@ pub struct EncodedFrame {
 pub struct ScreenCapture {
     pipeline: Option<gst::Pipeline>,
     appsink: Option<gst_app::AppSink>,
+    encoder: Option<gst::Element>,
     config: CaptureConfig,
     running: Arc<Mutex<bool>>,
+    current_bitrate_kbps: u32,
 }
 
 #[cfg(feature = "screenshare")]
 impl ScreenCapture {
     /// Create a new screen capture instance
     pub fn new(config: CaptureConfig) -> Self {
+        let current_bitrate_kbps = config.bitrate_kbps;
         Self {
             pipeline: None,
             appsink: None,
-            config,
+            encoder: None,
             running: Arc::new(Mutex::new(false)),
+            current_bitrate_kbps,
+            config,
         }
     }
 
@@ -99,8 +104,14 @@ impl ScreenCapture {
             .downcast::<gst_app::AppSink>()
             .map_err(|_| crate::ProtocolError::Plugin("Failed to downcast appsink".to_string()))?;
 
+        // Get encoder element for dynamic bitrate control
+        let encoder = pipeline
+            .by_name("encoder")
+            .ok_or_else(|| crate::ProtocolError::Plugin("Failed to get encoder element".to_string()))?;
+
         self.pipeline = Some(pipeline);
         self.appsink = Some(appsink);
+        self.encoder = Some(encoder);
 
         info!("Screen capture initialized");
         Ok(())
@@ -109,13 +120,14 @@ impl ScreenCapture {
     /// Create the GStreamer pipeline for screen capture
     fn create_pipeline(&self) -> Result<gst::Pipeline> {
         // Build pipeline string based on configuration
+        // Note: encoder is named "encoder" for dynamic bitrate control
         let pipeline_str = if let (Some(fd), Some(node_id)) = (self.config.pipewire_fd, self.config.pipewire_node_id) {
             // PipeWire source with portal fd and node
             format!(
                 "pipewiresrc fd={} path={} do-timestamp=true keepalive-time=1000 ! \
                  videoconvert ! videoscale ! \
                  video/x-raw,framerate={}/1{} ! \
-                 x264enc tune=zerolatency bitrate={} speed-preset=ultrafast key-int-max=30 ! \
+                 x264enc name=encoder tune=zerolatency bitrate={} speed-preset=ultrafast key-int-max=30 ! \
                  video/x-h264,stream-format=byte-stream ! \
                  appsink name=sink emit-signals=true drop=true max-buffers=2",
                 fd,
@@ -131,7 +143,7 @@ impl ScreenCapture {
                 "videotestsrc pattern=smpte is-live=true ! \
                  video/x-raw,framerate={}/1,width=1280,height=720 ! \
                  videoconvert ! \
-                 x264enc tune=zerolatency bitrate={} speed-preset=ultrafast key-int-max=30 ! \
+                 x264enc name=encoder tune=zerolatency bitrate={} speed-preset=ultrafast key-int-max=30 ! \
                  video/x-h264,stream-format=byte-stream ! \
                  appsink name=sink emit-signals=true drop=true max-buffers=2",
                 self.config.fps,
@@ -160,79 +172,73 @@ impl ScreenCapture {
 
     /// Start capturing
     pub fn start(&mut self) -> Result<()> {
-        if let Some(pipeline) = &self.pipeline {
-            pipeline.set_state(gst::State::Playing)
-                .map_err(|e| crate::ProtocolError::Plugin(format!("Failed to start capture: {}", e)))?;
+        let pipeline = self.pipeline.as_ref()
+            .ok_or_else(|| crate::ProtocolError::Plugin("Pipeline not initialized".to_string()))?;
 
-            info!("Screen capture started");
+        pipeline.set_state(gst::State::Playing)
+            .map_err(|e| crate::ProtocolError::Plugin(format!("Failed to start capture: {}", e)))?;
 
-            // Update running flag
-            let running = self.running.clone();
-            tokio::spawn(async move {
-                let mut guard = running.lock().await;
-                *guard = true;
-            });
+        info!("Screen capture started");
 
-            Ok(())
-        } else {
-            Err(crate::ProtocolError::Plugin("Pipeline not initialized".to_string()))
-        }
+        // Update running flag asynchronously
+        let running = self.running.clone();
+        tokio::spawn(async move {
+            *running.lock().await = true;
+        });
+
+        Ok(())
     }
 
     /// Stop capturing
     pub fn stop(&mut self) -> Result<()> {
-        if let Some(pipeline) = &self.pipeline {
-            pipeline.set_state(gst::State::Null)
-                .map_err(|e| crate::ProtocolError::Plugin(format!("Failed to stop capture: {}", e)))?;
+        let Some(pipeline) = &self.pipeline else {
+            return Ok(()); // Not initialized, nothing to stop
+        };
 
-            info!("Screen capture stopped");
+        pipeline.set_state(gst::State::Null)
+            .map_err(|e| crate::ProtocolError::Plugin(format!("Failed to stop capture: {}", e)))?;
 
-            // Update running flag
-            let running = self.running.clone();
-            tokio::spawn(async move {
-                let mut guard = running.lock().await;
-                *guard = false;
-            });
+        info!("Screen capture stopped");
 
-            Ok(())
-        } else {
-            Ok(()) // Not initialized, nothing to stop
-        }
+        // Update running flag asynchronously
+        let running = self.running.clone();
+        tokio::spawn(async move {
+            *running.lock().await = false;
+        });
+
+        Ok(())
     }
 
     /// Pull the next encoded frame (non-blocking)
     ///
     /// Returns None if no frame is available yet
     pub fn pull_frame(&self) -> Result<Option<EncodedFrame>> {
-        if let Some(appsink) = &self.appsink {
-            // Try to pull with a small timeout
-            match appsink.try_pull_sample(gst::ClockTime::from_mseconds(1)) {
-                Some(sample) => {
-                    let buffer = sample.buffer()
-                        .ok_or_else(|| crate::ProtocolError::Plugin("No buffer in sample".to_string()))?;
+        let appsink = self.appsink.as_ref()
+            .ok_or_else(|| crate::ProtocolError::Plugin("Appsink not initialized".to_string()))?;
 
-                    let map = buffer.map_readable()
-                        .map_err(|_| crate::ProtocolError::Plugin("Failed to map buffer".to_string()))?;
+        // Try to pull with a small timeout
+        let Some(sample) = appsink.try_pull_sample(gst::ClockTime::from_mseconds(1)) else {
+            return Ok(None);
+        };
 
-                    let pts = buffer.pts().map(|t| t.nseconds()).unwrap_or(0);
-                    let duration = buffer.duration().map(|t| t.nseconds()).unwrap_or(0);
+        let buffer = sample.buffer()
+            .ok_or_else(|| crate::ProtocolError::Plugin("No buffer in sample".to_string()))?;
 
-                    // Check for keyframe (delta unit flag NOT set means keyframe)
-                    let flags = buffer.flags();
-                    let is_keyframe = !flags.contains(gst::BufferFlags::DELTA_UNIT);
+        let map = buffer.map_readable()
+            .map_err(|_| crate::ProtocolError::Plugin("Failed to map buffer".to_string()))?;
 
-                    Ok(Some(EncodedFrame {
-                        data: map.to_vec(),
-                        pts,
-                        duration,
-                        is_keyframe,
-                    }))
-                }
-                None => Ok(None),
-            }
-        } else {
-            Err(crate::ProtocolError::Plugin("Appsink not initialized".to_string()))
-        }
+        let pts = buffer.pts().map_or(0, |t| t.nseconds());
+        let duration = buffer.duration().map_or(0, |t| t.nseconds());
+
+        // Check for keyframe (delta unit flag NOT set means keyframe)
+        let is_keyframe = !buffer.flags().contains(gst::BufferFlags::DELTA_UNIT);
+
+        Ok(Some(EncodedFrame {
+            data: map.to_vec(),
+            pts,
+            duration,
+            is_keyframe,
+        }))
     }
 
     /// Check if capture is running
@@ -249,6 +255,27 @@ impl ScreenCapture {
     pub fn config(&self) -> &CaptureConfig {
         &self.config
     }
+
+    /// Get current bitrate in kbps
+    pub fn current_bitrate_kbps(&self) -> u32 {
+        self.current_bitrate_kbps
+    }
+
+    /// Dynamically adjust encoder bitrate while streaming
+    ///
+    /// This allows adaptive bitrate control based on network conditions.
+    /// The change takes effect immediately without stopping the pipeline.
+    pub fn set_bitrate(&mut self, bitrate_kbps: u32) -> Result<()> {
+        let encoder = self.encoder.as_ref()
+            .ok_or_else(|| crate::ProtocolError::Plugin("Encoder not initialized".to_string()))?;
+
+        // Clamp to valid range and apply
+        let bitrate_kbps = bitrate_kbps.clamp(100, 50000);
+        encoder.set_property("bitrate", bitrate_kbps);
+        self.current_bitrate_kbps = bitrate_kbps;
+        debug!("Encoder bitrate adjusted to {} kbps", bitrate_kbps);
+        Ok(())
+    }
 }
 
 #[cfg(feature = "screenshare")]
@@ -264,12 +291,14 @@ impl Drop for ScreenCapture {
 #[cfg(not(feature = "screenshare"))]
 pub struct ScreenCapture {
     config: CaptureConfig,
+    current_bitrate_kbps: u32,
 }
 
 #[cfg(not(feature = "screenshare"))]
 impl ScreenCapture {
     pub fn new(config: CaptureConfig) -> Self {
-        Self { config }
+        let initial_bitrate = config.bitrate_kbps;
+        Self { config, current_bitrate_kbps: initial_bitrate }
     }
 
     pub fn init(&mut self) -> crate::Result<()> {
@@ -298,6 +327,14 @@ impl ScreenCapture {
 
     pub fn config(&self) -> &CaptureConfig {
         &self.config
+    }
+
+    pub fn current_bitrate_kbps(&self) -> u32 {
+        self.current_bitrate_kbps
+    }
+
+    pub fn set_bitrate(&mut self, _bitrate_kbps: u32) -> crate::Result<()> {
+        Err(crate::ProtocolError::Plugin("screenshare feature not enabled".to_string()))
     }
 }
 

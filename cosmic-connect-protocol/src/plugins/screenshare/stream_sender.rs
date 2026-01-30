@@ -41,7 +41,16 @@ pub struct StreamSender {
     stream: Option<TcpStream>,
     frames_sent: u64,
     bytes_sent: u64,
+    /// Bytes sent in current measurement window
+    window_bytes: u64,
+    /// Start time of current measurement window
+    window_start: std::time::Instant,
+    /// Last calculated throughput in bytes per second
+    throughput_bps: u64,
 }
+
+/// Measurement window duration for throughput calculation
+const THROUGHPUT_WINDOW_MS: u64 = 1000;
 
 impl StreamSender {
     /// Create a new stream sender
@@ -50,6 +59,9 @@ impl StreamSender {
             stream: None,
             frames_sent: 0,
             bytes_sent: 0,
+            window_bytes: 0,
+            window_start: std::time::Instant::now(),
+            throughput_bps: 0,
         }
     }
 
@@ -69,6 +81,7 @@ impl StreamSender {
 
         info!("Connected to viewer at {}", addr);
         self.stream = Some(stream);
+        self.reset_throughput();
         Ok(())
     }
 
@@ -86,11 +99,10 @@ impl StreamSender {
 
     /// Send a cursor position update
     pub async fn send_cursor(&mut self, x: i32, y: i32, visible: bool) -> Result<()> {
-        let payload = [
-            (x >> 24) as u8, (x >> 16) as u8, (x >> 8) as u8, x as u8,
-            (y >> 24) as u8, (y >> 16) as u8, (y >> 8) as u8, y as u8,
-            if visible { 1 } else { 0 },
-        ];
+        let mut payload = [0u8; 9];
+        payload[0..4].copy_from_slice(&x.to_be_bytes());
+        payload[4..8].copy_from_slice(&y.to_be_bytes());
+        payload[8] = u8::from(visible);
         self.send_frame(FrameType::Cursor, 0, &payload).await
     }
 
@@ -101,36 +113,40 @@ impl StreamSender {
 
     /// Send a frame with the specified type
     async fn send_frame(&mut self, frame_type: FrameType, timestamp_ns: u64, payload: &[u8]) -> Result<()> {
-        if let Some(stream) = &mut self.stream {
-            // Build header (17 bytes total)
-            let mut header = [0u8; 17];
-            header[0..4].copy_from_slice(MAGIC_HEADER);
-            header[4] = frame_type as u8;
-            header[5..13].copy_from_slice(&timestamp_ns.to_be_bytes());
-            header[13..17].copy_from_slice(&(payload.len() as u32).to_be_bytes());
+        let stream = self.stream.as_mut()
+            .ok_or_else(|| crate::ProtocolError::InvalidState("Not connected".to_string()))?;
 
-            // Write header and payload
-            stream.write_all(&header).await.map_err(|e| {
-                error!("Failed to write frame header: {}", e);
+        // Build header (17 bytes total)
+        let mut header = [0u8; 17];
+        header[0..4].copy_from_slice(MAGIC_HEADER);
+        header[4] = frame_type as u8;
+        header[5..13].copy_from_slice(&timestamp_ns.to_be_bytes());
+        header[13..17].copy_from_slice(&(payload.len() as u32).to_be_bytes());
+
+        // Write header and payload
+        stream.write_all(&header).await.map_err(|e| {
+            error!("Failed to write frame header: {}", e);
+            crate::ProtocolError::Io(e)
+        })?;
+
+        if !payload.is_empty() {
+            stream.write_all(payload).await.map_err(|e| {
+                error!("Failed to write frame payload: {}", e);
                 crate::ProtocolError::Io(e)
             })?;
-
-            if !payload.is_empty() {
-                stream.write_all(payload).await.map_err(|e| {
-                    error!("Failed to write frame payload: {}", e);
-                    crate::ProtocolError::Io(e)
-                })?;
-            }
-
-            // Update stats
-            self.frames_sent += 1;
-            self.bytes_sent += (17 + payload.len()) as u64;
-
-            debug!("Sent frame type {:?}, {} bytes", frame_type, payload.len());
-            Ok(())
-        } else {
-            Err(crate::ProtocolError::InvalidState("Not connected".to_string()))
         }
+
+        // Update stats
+        let frame_size = (17 + payload.len()) as u64;
+        self.frames_sent += 1;
+        self.bytes_sent += frame_size;
+        self.window_bytes += frame_size;
+
+        // Update throughput measurement
+        self.update_throughput();
+
+        debug!("Sent frame type {:?}, {} bytes", frame_type, payload.len());
+        Ok(())
     }
 
     /// Flush the stream
@@ -162,6 +178,41 @@ impl StreamSender {
     /// Get statistics
     pub fn stats(&self) -> (u64, u64) {
         (self.frames_sent, self.bytes_sent)
+    }
+
+    /// Get current throughput in bits per second
+    pub fn throughput_bps(&self) -> u64 {
+        self.throughput_bps * 8 // Convert bytes/s to bits/s
+    }
+
+    /// Get current throughput in kbps
+    pub fn throughput_kbps(&self) -> u32 {
+        (self.throughput_bps() / 1000) as u32
+    }
+
+    /// Update throughput measurement
+    fn update_throughput(&mut self) {
+        let elapsed = self.window_start.elapsed();
+        if elapsed.as_millis() < u128::from(THROUGHPUT_WINDOW_MS) {
+            return;
+        }
+
+        // Calculate throughput: bytes per second
+        let elapsed_secs = elapsed.as_secs_f64();
+        if elapsed_secs > 0.0 {
+            self.throughput_bps = (self.window_bytes as f64 / elapsed_secs) as u64;
+        }
+
+        // Reset window
+        self.window_bytes = 0;
+        self.window_start = std::time::Instant::now();
+    }
+
+    /// Reset throughput measurement (call when connection is established)
+    pub fn reset_throughput(&mut self) {
+        self.window_bytes = 0;
+        self.window_start = std::time::Instant::now();
+        self.throughput_bps = 0;
     }
 }
 
