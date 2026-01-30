@@ -51,12 +51,13 @@ rusqlite = { version = "0.38.0", features = ["bundled"] }
 gstreamer = { version = "0.24.4", optional = true }
 gstreamer-app = { version = "0.24.4", optional = true }
 gstreamer-video = { version = "0.24.4", optional = true }
+ashpd = { workspace = true, optional = true }
 
 [features]
 default = []
 remotedesktop = ["pipewire", "openh264", "lz4", "image"]
 low_latency = []
-screenshare = ["gstreamer", "gstreamer-app", "gstreamer-video", "image"]
+screenshare = ["gstreamer", "gstreamer-app", "gstreamer-video", "image", "ashpd"]
 
 [dev-dependencies]
 tokio-test = "0.4"

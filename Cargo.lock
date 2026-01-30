@@ -1702,6 +1702,7 @@ dependencies = [
 name = "cosmic-connect-protocol"
 version = "0.1.0"
 dependencies = [
+ "ashpd 0.12.1",
  "async-trait",
  "blake3",
  "bluer",

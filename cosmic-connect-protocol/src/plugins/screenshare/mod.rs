@@ -54,14 +54,15 @@
 //! - [x] Video decoding (H.264 via avdec_h264)
 //! - [x] Stream receiver (TCP with custom protocol)
 //! - [x] Stream sender (TCP with custom protocol)
-//! - [ ] XDG Desktop Portal integration for screen selection
-//! - [ ] Cursor tracking and highlighting
-//! - [ ] Annotation overlay system
+//! - [x] XDG Desktop Portal integration for screen selection
+//! - [ ] Cursor tracking and highlighting (packets parsed, UI integration needed)
+//! - [ ] Annotation overlay system (packets parsed, UI integration needed)
 //! - [ ] Adaptive bitrate control
 //! - [ ] Multiple viewer management
 
 pub mod capture;
 pub mod decoder;
+pub mod portal;
 pub mod stream_receiver;
 pub mod stream_sender;
 
@@ -486,9 +487,8 @@ impl ScreenSharePlugin {
         let session = ShareSession::new(config);
         self.active_session = Some(session);
 
-        // TODO: Initialize screen capture
-        // TODO: Start encoding thread
-        // TODO: Start frame sender thread
+        // Note: Capture and streaming are started when receiver sends ready packet
+        // See start_streaming_to_device() which is called from handle_packet()
 
         Ok(())
     }
@@ -654,17 +654,36 @@ impl ScreenSharePlugin {
             *stop = false;
         }
 
+        // Request screen share permission via XDG Desktop Portal
+        // This shows the system screen selection dialog
+        let portal_session = match portal::request_screencast().await {
+            Ok(session) => {
+                info!("Portal session acquired: node_id={}", session.pipewire_node_id);
+                Some(session)
+            }
+            Err(e) => {
+                warn!("Portal request failed ({}), falling back to test source", e);
+                None
+            }
+        };
+
         // Clone Arc for the spawned task
         let stop_flag = self.stop_streaming.clone();
 
-        // Create capture config
+        // Create capture config with portal info if available
+        let (pipewire_fd, pipewire_node_id) = if let Some(ref session) = portal_session {
+            (Some(session.fd()), Some(session.pipewire_node_id))
+        } else {
+            (None, None)
+        };
+
         let capture_config = CaptureConfig {
             fps: config.fps as u32,
             bitrate_kbps: config.bitrate_kbps,
             width: 0,  // Auto
             height: 0, // Auto
-            pipewire_node_id: None, // TODO: Get from portal
-            pipewire_fd: None,      // TODO: Get from portal
+            pipewire_node_id,
+            pipewire_fd,
         };
 
         // Spawn streaming task
@@ -738,6 +757,8 @@ impl ScreenSharePlugin {
 
             let (frames, bytes) = sender.stats();
             info!("Stream stats: {} frames, {} bytes sent", frames, bytes);
+
+            // Note: portal_session is dropped here, which closes the portal session
         });
 
         self.streaming_task = Some(handle);
@@ -897,19 +918,20 @@ impl Plugin for ScreenSharePlugin {
             // in the custom protocol, but kept for compatibility or fallback.
             debug!("Received screen frame packet (unexpected for streaming mode)");
         } else if packet.is_type("cconnect.screenshare.cursor") {
-            // Receive cursor position
+            // Receive cursor position (for highlighting when cursor is not embedded in stream)
             let position: CursorPosition = serde_json::from_value(packet.body.clone())
                 .map_err(|e| ProtocolError::InvalidPacket(e.to_string()))?;
 
-            // TODO: Update cursor overlay on display
-            // Need to send this to UI via DBus if not part of stream
+            // Note: When using CursorMode::Embedded, cursor is already in video frames.
+            // This packet is for cursor highlighting overlay or when using CursorMode::Metadata.
+            // Future: Emit DBus signal for UI to show cursor highlight effect
             debug!("Cursor updated: ({}, {})", position.x, position.y);
         } else if packet.is_type("cconnect.screenshare.annotation") {
-            // Receive annotation
+            // Receive annotation (presenter drawing on shared screen)
             let annotation: Annotation = serde_json::from_value(packet.body.clone())
                 .map_err(|e| ProtocolError::InvalidPacket(e.to_string()))?;
 
-            // TODO: Draw annotation on display overlay
+            // Future: Emit DBus signal for UI to render annotation overlay
             debug!("Annotation received: {}", annotation.annotation_type);
         } else if packet.is_type("cconnect.screenshare.stop") {
             // Remote device stopped sharing
