@@ -291,6 +291,8 @@ struct CConnectApplet {
     // Drag-and-drop state
     drag_hover_device: Option<String>, // device_id being hovered with files
     dragging_files: bool,              // whether files are being dragged over window
+    // Context menu state
+    context_menu_device: Option<String>, // device_id with open context menu
 }
 
 #[derive(Debug, Clone)]
@@ -445,6 +447,9 @@ enum Message {
     FileDragLeave,
     FileDropped(std::path::PathBuf),
     SetDragHoverDevice(Option<String>),
+    // Context menu
+    ShowContextMenu(String),  // device_id
+    CloseContextMenu,
     // File Transfer events
     TransferProgress(
         String,
@@ -728,6 +733,7 @@ impl cosmic::Application for CConnectApplet {
             focus_target: FocusTarget::None,
             drag_hover_device: None,
             dragging_files: false,
+            context_menu_device: None,
         };
         (app, Task::none())
     }
@@ -1517,6 +1523,15 @@ impl cosmic::Application for CConnectApplet {
             }
             Message::SetDragHoverDevice(device_id) => {
                 self.drag_hover_device = device_id;
+                Task::none()
+            }
+            // Context menu
+            Message::ShowContextMenu(device_id) => {
+                self.context_menu_device = Some(device_id);
+                Task::none()
+            }
+            Message::CloseContextMenu => {
+                self.context_menu_device = None;
                 Task::none()
             }
             // File Transfer events
@@ -2680,6 +2695,14 @@ impl CConnectApplet {
             );
         }
 
+        // Add context menu if open for this device
+        if self.context_menu_device.as_ref() == Some(device_id) {
+            content = content.push(
+                container(self.device_context_menu_view(device_id, device))
+                    .padding(Padding::from([0.0, 0.0, 0.0, 48.0 + SPACE_S])),
+            );
+        }
+
         // Check if this device is a valid drop target
         let can_receive_files = device.is_connected()
             && device.is_paired()
@@ -2855,7 +2878,156 @@ impl CConnectApplet {
         } else {
             actions = actions.push(button::text(label).on_press(message).padding(SPACE_XS));
         }
+
+        // Context menu button (more options)
+        let is_menu_open = self.context_menu_device.as_ref() == Some(&device_id.to_string());
+        actions = actions.push(cosmic::widget::tooltip(
+            button::icon(icon::from_name(if is_menu_open {
+                "go-up-symbolic"
+            } else {
+                "view-more-symbolic"
+            }).size(ICON_S))
+                .on_press(if is_menu_open {
+                    Message::CloseContextMenu
+                } else {
+                    Message::ShowContextMenu(device_id.to_string())
+                })
+                .padding(SPACE_XS)
+                .class(if is_menu_open {
+                    cosmic::theme::Button::Suggested
+                } else {
+                    cosmic::theme::Button::Standard
+                }),
+            "More options",
+            cosmic::widget::tooltip::Position::Bottom,
+        ));
+
         actions
+    }
+
+    /// Builds the context menu for a device
+    fn device_context_menu_view<'a>(
+        &'a self,
+        device_id: &str,
+        device: &'a Device,
+    ) -> Element<'a, Message> {
+        // Helper to create consistent menu items
+        let menu_item = |icon_name: &'a str,
+                         label: &'a str,
+                         message: Message,
+                         style: cosmic::theme::Button|
+         -> Element<'a, Message> {
+            button::custom(
+                row![
+                    icon::from_name(icon_name).size(ICON_S),
+                    text(label),
+                ]
+                .spacing(SPACE_S)
+                .align_y(cosmic::iced::Alignment::Center),
+            )
+            .on_press(message)
+            .padding(SPACE_S)
+            .width(Length::Fill)
+            .class(style)
+            .into()
+        };
+
+        let mut menu_items: Vec<Element<'a, Message>> = Vec::new();
+
+        // Header
+        menu_items.push(
+            container(cosmic::widget::text::caption("Quick Actions"))
+                .padding(Padding::from([SPACE_XS, SPACE_S]))
+                .into(),
+        );
+        menu_items.push(divider::horizontal::default().into());
+
+        // Connected device actions
+        if device.is_connected() && device.is_paired() {
+            menu_items.push(menu_item(
+                "document-edit-symbolic",
+                "Rename device",
+                Message::StartRenaming(device_id.to_string()),
+                cosmic::theme::Button::MenuItem,
+            ));
+
+            if device.has_incoming_capability("cconnect.share") {
+                menu_items.push(menu_item(
+                    "document-send-symbolic",
+                    "Send file...",
+                    Message::SendFile(device_id.to_string()),
+                    cosmic::theme::Button::MenuItem,
+                ));
+            }
+
+            if device.has_incoming_capability("cconnect.findmyphone.request") {
+                menu_items.push(menu_item(
+                    "find-location-symbolic",
+                    "Ring device",
+                    Message::FindPhone(device_id.to_string()),
+                    cosmic::theme::Button::MenuItem,
+                ));
+            }
+
+            if device.has_outgoing_capability("cconnect.screenshare") {
+                menu_items.push(menu_item(
+                    "video-display-symbolic",
+                    "Mirror screen",
+                    Message::LaunchScreenMirror(device_id.to_string()),
+                    cosmic::theme::Button::MenuItem,
+                ));
+            }
+
+            menu_items.push(divider::horizontal::default().into());
+        }
+
+        // Settings section
+        if device.is_paired() {
+            menu_items.push(menu_item(
+                "emblem-system-symbolic",
+                "Plugin settings",
+                Message::ToggleDeviceSettings(device_id.to_string()),
+                cosmic::theme::Button::MenuItem,
+            ));
+
+            menu_items.push(menu_item(
+                "document-properties-symbolic",
+                "Device details",
+                Message::ShowDeviceDetails(device_id.to_string()),
+                cosmic::theme::Button::MenuItem,
+            ));
+
+            menu_items.push(divider::horizontal::default().into());
+
+            menu_items.push(menu_item(
+                "edit-delete-symbolic",
+                "Unpair device",
+                Message::UnpairDevice(device_id.to_string()),
+                cosmic::theme::Button::Destructive,
+            ));
+        } else {
+            menu_items.push(menu_item(
+                "emblem-default-symbolic",
+                "Pair device",
+                Message::PairDevice(device_id.to_string()),
+                cosmic::theme::Button::Suggested,
+            ));
+        }
+
+        // Close menu button
+        menu_items.push(divider::horizontal::default().into());
+        menu_items.push(menu_item(
+            "window-close-symbolic",
+            "Close menu",
+            Message::CloseContextMenu,
+            cosmic::theme::Button::MenuItem,
+        ));
+
+        container(column(menu_items).spacing(SPACE_XXXS).width(Length::Fill))
+            .padding(SPACE_XS)
+            .width(Length::Fill)
+            .class(cosmic::theme::Container::Secondary)
+            .into()
     }
 
     /// Builds the device settings panel UI
