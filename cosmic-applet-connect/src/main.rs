@@ -286,6 +286,8 @@ struct CConnectApplet {
     notification_progress: f32,
     // Connection status to daemon
     daemon_connected: bool,
+    // Keyboard navigation state
+    focus_target: FocusTarget,
 }
 
 #[derive(Debug, Clone)]
@@ -301,6 +303,28 @@ enum NotificationType {
     Success,
     #[allow(dead_code)]
     Info,
+}
+
+/// Focus targets for keyboard navigation
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FocusTarget {
+    /// Search input field
+    Search,
+    /// Device at index in the filtered list
+    Device(usize),
+    /// Quick action button for device (device_index, action_index)
+    DeviceAction(usize, usize),
+    /// MPRIS player control (player_name, control: "prev", "play", "next")
+    MprisControl(String, String),
+    /// View mode tab (Devices, History, Transfers) - reserved for future use
+    #[allow(dead_code)]
+    ViewTab(ViewMode),
+    /// Settings button for device
+    DeviceSettings(usize),
+    /// Refresh button
+    Refresh,
+    /// None - nothing focused
+    None,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -404,6 +428,15 @@ enum Message {
         cosmic::iced::keyboard::Key,
         cosmic::iced::keyboard::Modifiers,
     ),
+    // Focus navigation
+    FocusNext,
+    FocusPrevious,
+    FocusUp,
+    FocusDown,
+    FocusLeft,
+    FocusRight,
+    ActivateFocused,
+    SetFocus(FocusTarget),
     // File Transfer events
     TransferProgress(
         String,
@@ -684,6 +717,7 @@ impl cosmic::Application for CConnectApplet {
             pending_operations: std::collections::HashSet::new(),
             notification_progress: 0.0,
             daemon_connected: true,
+            focus_target: FocusTarget::None,
         };
         (app, Task::none())
     }
@@ -1422,6 +1456,18 @@ impl cosmic::Application for CConnectApplet {
                 Task::none()
             }
             Message::KeyPress(key, modifiers) => self.handle_key_press(key, modifiers),
+            // Focus navigation
+            Message::FocusNext => self.focus_next(),
+            Message::FocusPrevious => self.focus_previous(),
+            Message::FocusUp => self.focus_up(),
+            Message::FocusDown => self.focus_down(),
+            Message::FocusLeft => self.focus_left(),
+            Message::FocusRight => self.focus_right(),
+            Message::ActivateFocused => self.activate_focused(),
+            Message::SetFocus(target) => {
+                self.focus_target = target;
+                Task::none()
+            }
             // File Transfer events
             Message::TransferProgress(tid, device_id, filename, cur, tot, dir) => {
                 self.active_transfers.insert(
@@ -2147,6 +2193,8 @@ impl CConnectApplet {
             }
 
             let mut device_groups = column![].spacing(SPACE_XXS).width(Length::Fill);
+            // Track device index for focus navigation (matches filtered_devices() order)
+            let mut device_index = 0usize;
 
             // Connected devices section
             if !connected.is_empty() {
@@ -2156,7 +2204,8 @@ impl CConnectApplet {
                         .width(Length::Fill),
                 );
                 for device_state in &connected {
-                    device_groups = device_groups.push(self.device_row(device_state));
+                    device_groups = device_groups.push(self.device_row(device_state, device_index));
+                    device_index += 1;
                 }
             }
 
@@ -2171,7 +2220,8 @@ impl CConnectApplet {
                         .width(Length::Fill),
                 );
                 for device_state in &available {
-                    device_groups = device_groups.push(self.device_row(device_state));
+                    device_groups = device_groups.push(self.device_row(device_state, device_index));
+                    device_index += 1;
                 }
             }
 
@@ -2186,7 +2236,8 @@ impl CConnectApplet {
                         .width(Length::Fill),
                 );
                 for device_state in &offline {
-                    device_groups = device_groups.push(self.device_row(device_state));
+                    device_groups = device_groups.push(self.device_row(device_state, device_index));
+                    device_index += 1;
                 }
             }
 
@@ -2433,9 +2484,17 @@ impl CConnectApplet {
         content.into()
     }
 
-    fn device_row<'a>(&'a self, device_state: &'a DeviceState) -> Element<'a, Message> {
+    fn device_row<'a>(&'a self, device_state: &'a DeviceState, device_index: usize) -> Element<'a, Message> {
         let device = &device_state.device;
         let device_id = &device.info.device_id;
+
+        // Check if this device is focused for keyboard navigation
+        let is_focused = matches!(&self.focus_target,
+            FocusTarget::Device(idx) |
+            FocusTarget::DeviceAction(idx, _) |
+            FocusTarget::DeviceSettings(idx)
+            if *idx == device_index
+        );
 
         let device_icon = device_type_icon(device.info.device_type);
 
@@ -2561,10 +2620,16 @@ impl CConnectApplet {
             );
         }
 
-        container(content)
+        // Apply focus indicator styling
+        let card_container = container(content)
             .width(Length::Fill)
-            .class(cosmic::theme::Container::Card)
-            .into()
+            .class(if is_focused {
+                cosmic::theme::Container::Primary
+            } else {
+                cosmic::theme::Container::Card
+            });
+
+        card_container.into()
     }
 
     fn build_device_actions<'a>(
@@ -3700,11 +3765,209 @@ impl CConnectApplet {
             }
         }
 
-        if key == cosmic::iced::keyboard::Key::Character("r".into()) && modifiers.control() {
-            return cosmic::task::message(cosmic::Action::App(Message::RefreshDevices));
+        // Keyboard shortcuts with Ctrl modifier
+        if modifiers.control() {
+            if let cosmic::iced::keyboard::Key::Character(c) = &key {
+                return match c.as_str() {
+                    "r" => cosmic::task::message(cosmic::Action::App(Message::RefreshDevices)),
+                    "f" => cosmic::task::message(cosmic::Action::App(Message::SetFocus(
+                        FocusTarget::Search,
+                    ))),
+                    _ => Task::none(),
+                };
+            }
         }
 
+        // Keyboard navigation
+        use cosmic::iced::keyboard::key::Named;
+        use cosmic::iced::keyboard::Key;
+        let message = match &key {
+            Key::Named(Named::Tab) if modifiers.shift() => Some(Message::FocusPrevious),
+            Key::Named(Named::Tab) => Some(Message::FocusNext),
+            Key::Named(Named::ArrowUp) => Some(Message::FocusUp),
+            Key::Named(Named::ArrowDown) => Some(Message::FocusDown),
+            Key::Named(Named::ArrowLeft) => Some(Message::FocusLeft),
+            Key::Named(Named::ArrowRight) => Some(Message::FocusRight),
+            Key::Named(Named::Enter | Named::Space) => Some(Message::ActivateFocused),
+            _ => None,
+        };
+
+        message
+            .map(|m| cosmic::task::message(cosmic::Action::App(m)))
+            .unwrap_or_else(Task::none)
+    }
+
+    /// Get list of focusable elements in current view
+    fn get_focusable_elements(&self) -> Vec<FocusTarget> {
+        let device_count = if self.view_mode == ViewMode::Devices {
+            self.filtered_devices().len()
+        } else {
+            0
+        };
+        let mpris_count = if self.selected_player.is_some() { 3 } else { 0 };
+
+        // Pre-allocate: 2 (search + refresh) + 4 per device + 3 for MPRIS
+        let capacity = 2 + (device_count * 4) + mpris_count;
+        let mut elements = Vec::with_capacity(capacity);
+
+        // Devices view elements
+        if self.view_mode == ViewMode::Devices {
+            elements.push(FocusTarget::Search);
+            elements.push(FocusTarget::Refresh);
+
+            // Device + actions for each device
+            for i in 0..device_count {
+                elements.push(FocusTarget::Device(i));
+                elements.push(FocusTarget::DeviceAction(i, 0)); // Ping
+                elements.push(FocusTarget::DeviceAction(i, 1)); // Send file
+                elements.push(FocusTarget::DeviceSettings(i));
+            }
+        }
+
+        // MPRIS controls
+        if let Some(player) = &self.selected_player {
+            for ctrl in ["prev", "play", "next"] {
+                elements.push(FocusTarget::MprisControl(player.clone(), ctrl.into()));
+            }
+        }
+
+        elements
+    }
+
+    /// Get filtered devices based on search query
+    fn filtered_devices(&self) -> Vec<&DeviceState> {
+        if self.search_query.is_empty() {
+            self.devices.iter().collect()
+        } else {
+            let query = self.search_query.to_lowercase();
+            self.devices
+                .iter()
+                .filter(|d| d.device.name().to_lowercase().contains(&query))
+                .collect()
+        }
+    }
+
+    /// Move focus to next element
+    fn focus_next(&mut self) -> Task<Message> {
+        let mut elements = self.get_focusable_elements();
+        if elements.is_empty() {
+            return Task::none();
+        }
+
+        let current_idx = elements.iter().position(|e| *e == self.focus_target);
+        let next_idx = current_idx.map_or(0, |idx| (idx + 1) % elements.len());
+
+        self.focus_target = elements.swap_remove(next_idx);
         Task::none()
+    }
+
+    /// Move focus to previous element
+    fn focus_previous(&mut self) -> Task<Message> {
+        let mut elements = self.get_focusable_elements();
+        if elements.is_empty() {
+            return Task::none();
+        }
+
+        let len = elements.len();
+        let current_idx = elements.iter().position(|e| *e == self.focus_target);
+        let prev_idx = current_idx.map_or(len - 1, |idx| idx.checked_sub(1).unwrap_or(len - 1));
+
+        self.focus_target = elements.swap_remove(prev_idx);
+        Task::none()
+    }
+
+    /// Extract device index from current focus target if applicable
+    fn focused_device_index(&self) -> Option<usize> {
+        match &self.focus_target {
+            FocusTarget::Device(idx)
+            | FocusTarget::DeviceAction(idx, _)
+            | FocusTarget::DeviceSettings(idx) => Some(*idx),
+            _ => None,
+        }
+    }
+
+    /// Move focus up (within device list)
+    fn focus_up(&mut self) -> Task<Message> {
+        if let Some(idx) = self.focused_device_index() {
+            if idx > 0 {
+                self.focus_target = FocusTarget::Device(idx - 1);
+                return Task::none();
+            }
+        }
+        self.focus_previous()
+    }
+
+    /// Move focus down (within device list)
+    fn focus_down(&mut self) -> Task<Message> {
+        let device_count = self.filtered_devices().len();
+        if let Some(idx) = self.focused_device_index() {
+            if idx + 1 < device_count {
+                self.focus_target = FocusTarget::Device(idx + 1);
+                return Task::none();
+            }
+        }
+        self.focus_next()
+    }
+
+    /// Move focus left (within quick actions)
+    fn focus_left(&mut self) -> Task<Message> {
+        self.focus_target = match &self.focus_target {
+            FocusTarget::DeviceAction(idx, action) if *action > 0 => {
+                FocusTarget::DeviceAction(*idx, action - 1)
+            }
+            FocusTarget::DeviceSettings(idx) => FocusTarget::DeviceAction(*idx, 1),
+            FocusTarget::MprisControl(player, ctrl) => match ctrl.as_str() {
+                "next" => FocusTarget::MprisControl(player.clone(), "play".into()),
+                "play" => FocusTarget::MprisControl(player.clone(), "prev".into()),
+                _ => return Task::none(),
+            },
+            _ => return Task::none(),
+        };
+        Task::none()
+    }
+
+    /// Move focus right (within quick actions)
+    fn focus_right(&mut self) -> Task<Message> {
+        self.focus_target = match &self.focus_target {
+            FocusTarget::DeviceAction(idx, 0) => FocusTarget::DeviceAction(*idx, 1),
+            FocusTarget::DeviceAction(idx, 1) => FocusTarget::DeviceSettings(*idx),
+            FocusTarget::Device(idx) => FocusTarget::DeviceAction(*idx, 0),
+            FocusTarget::MprisControl(player, ctrl) => match ctrl.as_str() {
+                "prev" => FocusTarget::MprisControl(player.clone(), "play".into()),
+                "play" => FocusTarget::MprisControl(player.clone(), "next".into()),
+                _ => return Task::none(),
+            },
+            _ => return Task::none(),
+        };
+        Task::none()
+    }
+
+    /// Activate the currently focused element
+    fn activate_focused(&mut self) -> Task<Message> {
+        // Helper to get device ID at index
+        let get_device_id = |idx: usize| -> Option<String> {
+            self.filtered_devices()
+                .get(idx)
+                .map(|d| d.device.id().to_string())
+        };
+
+        let message = match &self.focus_target {
+            FocusTarget::Device(idx) | FocusTarget::DeviceSettings(idx) => {
+                get_device_id(*idx).map(Message::ToggleDeviceSettings)
+            }
+            FocusTarget::DeviceAction(idx, 0) => get_device_id(*idx).map(Message::SendPing),
+            FocusTarget::DeviceAction(idx, 1) => get_device_id(*idx).map(Message::SendFile),
+            FocusTarget::DeviceAction(_, _) => None,
+            FocusTarget::MprisControl(player, ctrl) => {
+                Some(Message::MprisControl(player.clone(), ctrl.clone()))
+            }
+            FocusTarget::Refresh => Some(Message::RefreshDevices),
+            FocusTarget::Search | FocusTarget::ViewTab(_) | FocusTarget::None => None,
+        };
+
+        message
+            .map(|m| cosmic::task::message(cosmic::Action::App(m)))
+            .unwrap_or_else(Task::none)
     }
 
     /// Handle operation completion with success notifications
