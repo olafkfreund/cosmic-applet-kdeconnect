@@ -27,8 +27,12 @@
 //! Common hint keys include:
 //! - `urgency`: 0=low, 1=normal, 2=critical
 //! - `category`: Notification category (e.g., "im.received", "email.arrived")
-//! - `desktop-entry`: .desktop file name
-//! - `image-data`: Struct containing raw image data
+//! - `desktop-entry`: .desktop file name for app identification
+//! - `image-data`: Struct containing raw image data (width, height, rowstride, has_alpha, bits_per_sample, channels, data)
+//! - `image-path`: String path to image file
+//! - `icon_data`: Struct containing raw icon data (same format as image-data)
+//! - `sound-file`: String path to notification sound file
+//! - `action-icons`: Boolean indicating if actions have icons
 //! - `transient`: Boolean, should not persist
 //! - `resident`: Boolean, stays after dismissal
 //!
@@ -87,7 +91,7 @@ pub enum HintValue {
 /// freedesktop.org notification specification.
 ///
 /// Format: (width, height, rowstride, has_alpha, bits_per_sample, channels, data)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ImageData {
     /// Image width in pixels
     pub width: i32,
@@ -140,6 +144,37 @@ pub struct CapturedNotification {
     pub timestamp: u64,
 }
 
+/// Rich notification content extracted from hints
+///
+/// Provides convenient access to all rich content fields from notification hints.
+/// All fields are optional as hints may not be present.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RichNotificationData {
+    /// Urgency level: 0=low, 1=normal, 2=critical
+    pub urgency: u8,
+
+    /// Notification category (e.g., "im.received", "email.arrived")
+    pub category: Option<String>,
+
+    /// Desktop entry name for app identification
+    pub desktop_entry: Option<String>,
+
+    /// Raw image data embedded in notification
+    pub image_data: Option<ImageData>,
+
+    /// File path to notification image
+    pub image_path: Option<String>,
+
+    /// Raw icon data embedded in notification
+    pub icon_data: Option<ImageData>,
+
+    /// Path to notification sound file
+    pub sound_file: Option<String>,
+
+    /// Whether action buttons have icons
+    pub action_icons: bool,
+}
+
 impl CapturedNotification {
     /// Get urgency level from hints
     pub fn urgency(&self) -> u8 {
@@ -186,6 +221,58 @@ impl CapturedNotification {
             HintValue::ImageData(img) => Some(img),
             _ => None,
         })
+    }
+
+    /// Get image path if present
+    pub fn image_path(&self) -> Option<&str> {
+        self.hints.get("image-path").and_then(|v| match v {
+            HintValue::String(s) => Some(s.as_str()),
+            _ => None,
+        })
+    }
+
+    /// Get icon data if present
+    pub fn icon_data(&self) -> Option<&ImageData> {
+        self.hints.get("icon_data").and_then(|v| match v {
+            HintValue::ImageData(img) => Some(img),
+            _ => None,
+        })
+    }
+
+    /// Get sound file path if present
+    pub fn sound_file(&self) -> Option<&str> {
+        self.hints.get("sound-file").and_then(|v| match v {
+            HintValue::String(s) => Some(s.as_str()),
+            _ => None,
+        })
+    }
+
+    /// Check if actions have icons
+    pub fn action_icons(&self) -> bool {
+        self.hints
+            .get("action-icons")
+            .and_then(|v| match v {
+                HintValue::Boolean(b) => Some(*b),
+                _ => None,
+            })
+            .unwrap_or(false)
+    }
+
+    /// Extract all rich notification data from hints
+    ///
+    /// Provides a convenient way to access all rich content fields
+    /// in a single structured format.
+    pub fn rich_data(&self) -> RichNotificationData {
+        RichNotificationData {
+            urgency: self.urgency(),
+            category: self.category().map(String::from),
+            desktop_entry: self.desktop_entry().map(String::from),
+            image_data: self.image_data().cloned(),
+            image_path: self.image_path().map(String::from),
+            icon_data: self.icon_data().cloned(),
+            sound_file: self.sound_file().map(String::from),
+            action_icons: self.action_icons(),
+        }
     }
 }
 
@@ -491,7 +578,7 @@ impl NotificationListener {
 
     /// Parse DBus hints into HintValue map
     fn parse_hints(&self, hints_map: HashMap<String, zbus::zvariant::Value<'_>>) -> Result<HashMap<String, HintValue>> {
-        use zbus::zvariant::{Array, Structure, Value};
+        use zbus::zvariant::Value;
 
         let mut hints = HashMap::new();
 
@@ -712,6 +799,152 @@ mod tests {
             HintValue::Byte(0),
         );
         assert!(!config.should_capture_notification(&low_urgency_notif));
+    }
+
+    #[test]
+    fn test_captured_notification_image_path() {
+        let mut notification = create_test_notification();
+
+        assert_eq!(notification.image_path(), None);
+
+        notification.hints.insert(
+            "image-path".to_string(),
+            HintValue::String("/path/to/image.png".to_string()),
+        );
+        assert_eq!(notification.image_path(), Some("/path/to/image.png"));
+    }
+
+    #[test]
+    fn test_captured_notification_icon_data() {
+        let mut notification = create_test_notification();
+
+        assert!(notification.icon_data().is_none());
+
+        let icon = ImageData {
+            width: 32,
+            height: 32,
+            rowstride: 128,
+            has_alpha: true,
+            bits_per_sample: 8,
+            channels: 4,
+            data: vec![255u8; 4096],
+        };
+
+        notification.hints.insert(
+            "icon_data".to_string(),
+            HintValue::ImageData(icon.clone()),
+        );
+        assert!(notification.icon_data().is_some());
+        assert_eq!(notification.icon_data().unwrap().width, 32);
+    }
+
+    #[test]
+    fn test_captured_notification_sound_file() {
+        let mut notification = create_test_notification();
+
+        assert_eq!(notification.sound_file(), None);
+
+        notification.hints.insert(
+            "sound-file".to_string(),
+            HintValue::String("/usr/share/sounds/notification.ogg".to_string()),
+        );
+        assert_eq!(
+            notification.sound_file(),
+            Some("/usr/share/sounds/notification.ogg")
+        );
+    }
+
+    #[test]
+    fn test_captured_notification_action_icons() {
+        let mut notification = create_test_notification();
+
+        assert!(!notification.action_icons());
+
+        notification.hints.insert(
+            "action-icons".to_string(),
+            HintValue::Boolean(true),
+        );
+        assert!(notification.action_icons());
+    }
+
+    #[test]
+    fn test_rich_notification_data() {
+        let mut notification = create_test_notification();
+
+        // Add various hints
+        notification.hints.insert(
+            "urgency".to_string(),
+            HintValue::Byte(2),
+        );
+        notification.hints.insert(
+            "category".to_string(),
+            HintValue::String("im.received".to_string()),
+        );
+        notification.hints.insert(
+            "desktop-entry".to_string(),
+            HintValue::String("firefox".to_string()),
+        );
+        notification.hints.insert(
+            "image-path".to_string(),
+            HintValue::String("/tmp/image.png".to_string()),
+        );
+        notification.hints.insert(
+            "sound-file".to_string(),
+            HintValue::String("/tmp/sound.ogg".to_string()),
+        );
+        notification.hints.insert(
+            "action-icons".to_string(),
+            HintValue::Boolean(true),
+        );
+
+        let rich_data = notification.rich_data();
+
+        assert_eq!(rich_data.urgency, 2);
+        assert_eq!(rich_data.category, Some("im.received".to_string()));
+        assert_eq!(rich_data.desktop_entry, Some("firefox".to_string()));
+        assert_eq!(rich_data.image_path, Some("/tmp/image.png".to_string()));
+        assert_eq!(rich_data.sound_file, Some("/tmp/sound.ogg".to_string()));
+        assert!(rich_data.action_icons);
+    }
+
+    #[test]
+    fn test_rich_notification_data_defaults() {
+        let notification = create_test_notification();
+        let rich_data = notification.rich_data();
+
+        // Check defaults when hints are missing
+        assert_eq!(rich_data.urgency, 1); // Default normal
+        assert_eq!(rich_data.category, None);
+        assert_eq!(rich_data.desktop_entry, None);
+        assert_eq!(rich_data.image_data, None);
+        assert_eq!(rich_data.image_path, None);
+        assert_eq!(rich_data.icon_data, None);
+        assert_eq!(rich_data.sound_file, None);
+        assert!(!rich_data.action_icons); // Default false
+    }
+
+    #[test]
+    fn test_rich_notification_data_with_image_data() {
+        let mut notification = create_test_notification();
+
+        let image = ImageData {
+            width: 128,
+            height: 128,
+            rowstride: 512,
+            has_alpha: true,
+            bits_per_sample: 8,
+            channels: 4,
+            data: vec![0u8; 65536],
+        };
+
+        notification.hints.insert(
+            "image-data".to_string(),
+            HintValue::ImageData(image.clone()),
+        );
+
+        let rich_data = notification.rich_data();
+        assert!(rich_data.image_data.is_some());
+        assert_eq!(rich_data.image_data.unwrap().width, 128);
     }
 
     // Helper function to create test notification
