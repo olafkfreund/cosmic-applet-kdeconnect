@@ -124,7 +124,7 @@ impl Packet {
             let kde_type = packet_type.replace("cconnect.", "kdeconnect.");
             if self.packet_type == kde_type {
                 return true;
-            } 
+            }
         } else if packet_type.starts_with("kdeconnect.") {
             let c_type = packet_type.replace("kdeconnect.", "cconnect.");
             if self.packet_type == c_type {

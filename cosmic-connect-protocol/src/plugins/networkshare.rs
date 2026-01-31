@@ -151,8 +151,9 @@ impl NetworkSharePlugin {
 
     /// Handle SFTP packet from a device
     async fn handle_sftp_packet(&self, device: &Device, packet: &Packet) -> Result<()> {
-        let mut info: SftpInfo = serde_json::from_value(packet.body.clone())
-            .map_err(|e| crate::ProtocolError::InvalidPacket(format!("Failed to parse SFTP info: {}", e)))?;
+        let mut info: SftpInfo = serde_json::from_value(packet.body.clone()).map_err(|e| {
+            crate::ProtocolError::InvalidPacket(format!("Failed to parse SFTP info: {}", e))
+        })?;
 
         info.received_at = Some(std::time::Instant::now());
 
@@ -162,7 +163,10 @@ impl NetworkSharePlugin {
             info.connection_string()
         );
 
-        self.shares.write().await.insert(device.id().to_string(), info);
+        self.shares
+            .write()
+            .await
+            .insert(device.id().to_string(), info);
 
         debug!("SFTP share stored and ready for mounting");
 
@@ -246,8 +250,15 @@ impl Plugin for NetworkSharePlugin {
         vec![]
     }
 
-    async fn init(&mut self, device: &Device, _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>) -> Result<()> {
-        info!("NetworkShare plugin initialized for device {}", device.name());
+    async fn init(
+        &mut self,
+        device: &Device,
+        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+    ) -> Result<()> {
+        info!(
+            "NetworkShare plugin initialized for device {}",
+            device.name()
+        );
         Ok(())
     }
 
@@ -266,7 +277,10 @@ impl Plugin for NetworkSharePlugin {
         if packet.is_type(PACKET_TYPE_SFTP) || packet.is_type(PACKET_TYPE_CCONNECT_SFTP) {
             self.handle_sftp_packet(device, packet).await
         } else {
-            warn!("NetworkShare plugin received unknown packet type: {}", packet.packet_type);
+            warn!(
+                "NetworkShare plugin received unknown packet type: {}",
+                packet.packet_type
+            );
             Ok(())
         }
     }
@@ -332,8 +346,12 @@ mod tests {
     fn test_factory() {
         let factory = NetworkSharePluginFactory;
         assert_eq!(factory.name(), "networkshare");
-        assert!(factory.incoming_capabilities().contains(&PACKET_TYPE_SFTP.to_string()));
-        assert!(factory.incoming_capabilities().contains(&PACKET_TYPE_CCONNECT_SFTP.to_string()));
+        assert!(factory
+            .incoming_capabilities()
+            .contains(&PACKET_TYPE_SFTP.to_string()));
+        assert!(factory
+            .incoming_capabilities()
+            .contains(&PACKET_TYPE_CCONNECT_SFTP.to_string()));
         assert!(factory.outgoing_capabilities().is_empty());
     }
 
@@ -408,7 +426,10 @@ mod tests {
             path: Some("/sdcard".to_string()),
             received_at: None,
         };
-        assert_eq!(info.connection_string(), "kdeconnect@192.168.1.10:1739/sdcard");
+        assert_eq!(
+            info.connection_string(),
+            "kdeconnect@192.168.1.10:1739/sdcard"
+        );
     }
 
     #[test]
@@ -489,7 +510,7 @@ mod tests {
                 "user": "testuser",
                 "password": "secretpassword",
                 "path": "/storage/emulated/0"
-            })
+            }),
         );
 
         let result = plugin.handle_packet(&packet, &mut device).await;
@@ -510,7 +531,7 @@ mod tests {
                 "port": 2222,
                 "user": "cosmicuser",
                 "password": "cosmicpass"
-            })
+            }),
         );
 
         let result = plugin.handle_packet(&packet, &mut device).await;
@@ -527,7 +548,7 @@ mod tests {
             PACKET_TYPE_SFTP,
             json!({
                 "invalid": "data"
-            })
+            }),
         );
 
         let result = plugin.handle_packet(&packet, &mut device).await;
@@ -548,7 +569,7 @@ mod tests {
                 "port": 1739,
                 "user": "kdeconnect",
                 "password": "pass123"
-            })
+            }),
         );
 
         plugin.handle_packet(&packet, &mut device).await.unwrap();
@@ -580,7 +601,7 @@ mod tests {
                 "ip": "192.168.1.10",
                 "user": "user1",
                 "password": "pass1"
-            })
+            }),
         );
         plugin.handle_packet(&packet1, &mut device1).await.unwrap();
 
@@ -592,7 +613,7 @@ mod tests {
                 "ip": "192.168.1.20",
                 "user": "user2",
                 "password": "pass2"
-            })
+            }),
         );
         plugin.handle_packet(&packet2, &mut device2).await.unwrap();
 
@@ -613,7 +634,7 @@ mod tests {
                 "ip": "192.168.1.50",
                 "user": "test",
                 "password": "pass"
-            })
+            }),
         );
 
         plugin.handle_packet(&packet, &mut device).await.unwrap();
@@ -635,7 +656,7 @@ mod tests {
                 "ip": "192.168.1.10",
                 "user": "test",
                 "password": "pass"
-            })
+            }),
         );
 
         plugin.handle_packet(&packet, &mut device).await.unwrap();
@@ -656,7 +677,7 @@ mod tests {
                 "ip": "192.168.1.50",
                 "user": "test",
                 "password": "pass"
-            })
+            }),
         );
 
         plugin.handle_packet(&packet, &mut device).await.unwrap();
@@ -677,7 +698,7 @@ mod tests {
                 "ip": "192.168.1.10",
                 "user": "test",
                 "password": "pass"
-            })
+            }),
         );
 
         plugin.handle_packet(&packet, &mut device).await.unwrap();
@@ -698,7 +719,7 @@ mod tests {
                 "ip": "192.168.1.10",
                 "user": "user1",
                 "password": "pass1"
-            })
+            }),
         );
         plugin.handle_packet(&packet1, &mut device).await.unwrap();
 
@@ -709,7 +730,7 @@ mod tests {
                 "ip": "192.168.1.20",
                 "user": "user2",
                 "password": "pass2"
-            })
+            }),
         );
         plugin.handle_packet(&packet2, &mut device).await.unwrap();
 

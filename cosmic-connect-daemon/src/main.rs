@@ -10,24 +10,39 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use cosmic_connect_protocol::{
     connection::{ConnectionConfig, ConnectionEvent, ConnectionManager},
-    discovery::{default_additional_broadcast_addrs, DiscoveryConfig, DiscoveryEvent, DiscoveryService},
+    discovery::{
+        default_additional_broadcast_addrs, DiscoveryConfig, DiscoveryEvent, DiscoveryService,
+    },
     pairing::{PairingConfig, PairingEvent, PairingService, PairingStatus},
     plugins::{
-        audiostream::AudioStreamPluginFactory, battery::BatteryPluginFactory,
-        chat::ChatPluginFactory, clipboard::ClipboardPluginFactory,
+        audiostream::AudioStreamPluginFactory,
+        battery::BatteryPluginFactory,
+        chat::ChatPluginFactory,
+        clipboard::ClipboardPluginFactory,
         clipboardhistory::ClipboardHistoryPluginFactory,
+        connectivity_report::ConnectivityReportPluginFactory,
         contacts::{ContactsPlugin, ContactsPluginFactory},
-        filesync::FileSyncPluginFactory, findmyphone::FindMyPhonePluginFactory,
-        lock::LockPluginFactory, mousekeyboardshare::MouseKeyboardSharePluginFactory,
-        mpris::MprisPluginFactory, networkshare::NetworkSharePluginFactory,
+        filesync::FileSyncPluginFactory,
+        findmyphone::FindMyPhonePluginFactory,
+        lock::LockPluginFactory,
+        mousekeyboardshare::MouseKeyboardSharePluginFactory,
+        mpris::MprisPluginFactory,
+        networkshare::NetworkSharePluginFactory,
         notification::NotificationPluginFactory,
-        ping::PingPluginFactory, power::PowerPluginFactory, presenter::PresenterPluginFactory,
-        r#macro::MacroPluginFactory, remoteinput::RemoteInputPluginFactory,
-        runcommand::RunCommandPluginFactory, screenshare::ScreenSharePluginFactory,
-        screenshot::ScreenshotPluginFactory, share::SharePluginFactory,
-        systemmonitor::SystemMonitorPluginFactory, systemvolume::SystemVolumePluginFactory,
-        connectivity_report::ConnectivityReportPluginFactory, telephony::TelephonyPluginFactory,
-        wol::WolPluginFactory, PluginManager,
+        ping::PingPluginFactory,
+        power::PowerPluginFactory,
+        presenter::PresenterPluginFactory,
+        r#macro::MacroPluginFactory,
+        remoteinput::RemoteInputPluginFactory,
+        runcommand::RunCommandPluginFactory,
+        screenshare::ScreenSharePluginFactory,
+        screenshot::ScreenshotPluginFactory,
+        share::SharePluginFactory,
+        systemmonitor::SystemMonitorPluginFactory,
+        systemvolume::SystemVolumePluginFactory,
+        telephony::TelephonyPluginFactory,
+        wol::WolPluginFactory,
+        PluginManager,
     },
     CertificateInfo, DeviceInfo, DeviceManager, DeviceType, Packet, TransportManager,
     TransportManagerConfig, TransportManagerEvent,
@@ -120,19 +135,19 @@ impl Daemon {
     /// Create a new daemon
     async fn new(config: Config) -> Result<Self> {
         // Ensure directories exist
-                    config
-                        .ensure_directories()
-                        .context("Failed to create directories")?;
-        
-                // Initialize error handler
-                let error_handler = Arc::new(ErrorHandler::new());
-                if let Err(e) = error_handler.init().await {
-                    warn!("Failed to initialize error handler: {}", e);
-                }
-        
-                // Load or generate certificate
-                let certificate =
-                    Self::load_or_generate_certificate(&config).context("Failed to load certificate")?;
+        config
+            .ensure_directories()
+            .context("Failed to create directories")?;
+
+        // Initialize error handler
+        let error_handler = Arc::new(ErrorHandler::new());
+        if let Err(e) = error_handler.init().await {
+            warn!("Failed to initialize error handler: {}", e);
+        }
+
+        // Load or generate certificate
+        let certificate =
+            Self::load_or_generate_certificate(&config).context("Failed to load certificate")?;
         // Create device info
         let device_type = match config.device.device_type.as_str() {
             "laptop" => DeviceType::Laptop,
@@ -160,7 +175,10 @@ impl Daemon {
             );
             info!("Generated new device ID: {}", info.device_id);
             if let Err(e) = config.save_device_id(&info.device_id) {
-                warn!("Failed to save device ID: {}. ID will change on next restart.", e);
+                warn!(
+                    "Failed to save device ID: {}. ID will change on next restart.",
+                    e
+                );
             }
             info
         };
@@ -551,7 +569,10 @@ impl Daemon {
         self.device_info.outgoing_capabilities = outgoing;
 
         // Update connection manager with new capabilities
-        self.connection_manager.write().await.update_device_info(self.device_info.clone());
+        self.connection_manager
+            .write()
+            .await
+            .update_device_info(self.device_info.clone());
 
         let device_info = self.device_info.clone();
         let discovery_config = DiscoveryConfig {
@@ -789,16 +810,26 @@ impl Daemon {
                             .init_device_plugins(&device_id, device, packet_sender.clone())
                             .await
                         {
-                            error!("Failed to initialize plugins for device {}: {}", device_id, e);
+                            error!(
+                                "Failed to initialize plugins for device {}: {}",
+                                device_id, e
+                            );
                         } else {
                             info!("Initialized plugins for device {} after pairing", device_id);
 
                             // Set TLS config on SharePlugin for secure file transfers
-                            if let Some(plugin) = plug_manager.get_device_plugin_mut(&device_id, "share") {
+                            if let Some(plugin) =
+                                plug_manager.get_device_plugin_mut(&device_id, "share")
+                            {
                                 use cosmic_connect_protocol::plugins::share::SharePlugin;
-                                if let Some(share_plugin) = plugin.as_any_mut().downcast_mut::<SharePlugin>() {
+                                if let Some(share_plugin) =
+                                    plugin.as_any_mut().downcast_mut::<SharePlugin>()
+                                {
                                     share_plugin.set_tls_config(tls_config.clone());
-                                    debug!("Set TLS config on SharePlugin for device {}", device_id);
+                                    debug!(
+                                        "Set TLS config on SharePlugin for device {}",
+                                        device_id
+                                    );
                                 }
                             }
                         }
@@ -1267,12 +1298,15 @@ impl Daemon {
                                         }
                                         _ => {
                                             if action_key.starts_with("open_web:") {
-                                                let url = action_key.trim_start_matches("open_web:").to_string();
+                                                let url = action_key
+                                                    .trim_start_matches("open_web:")
+                                                    .to_string();
                                                 info!("Opening web URL from notification: {}", url);
                                                 tokio::spawn(async move {
-                                                    if let Err(e) = tokio::process::Command::new("xdg-open")
-                                                        .arg(url)
-                                                        .spawn()
+                                                    if let Err(e) =
+                                                        tokio::process::Command::new("xdg-open")
+                                                            .arg(url)
+                                                            .spawn()
                                                     {
                                                         error!("Failed to open web URL: {}", e);
                                                     }
@@ -1282,7 +1316,10 @@ impl Daemon {
                                                 // TODO: This would normally trigger a UI dialog to get user input
                                                 // and then send a cconnect.notification.reply packet.
                                             } else {
-                                                warn!("Unknown notification action: {}", action_key);
+                                                warn!(
+                                                    "Unknown notification action: {}",
+                                                    action_key
+                                                );
                                             }
                                         }
                                     }
@@ -1355,11 +1392,18 @@ impl Daemon {
                                 info!("Initialized plugins for device {}", device_id);
 
                                 // Set TLS config on SharePlugin for secure file transfers
-                                if let Some(plugin) = plug_manager.get_device_plugin_mut(&device_id, "share") {
+                                if let Some(plugin) =
+                                    plug_manager.get_device_plugin_mut(&device_id, "share")
+                                {
                                     use cosmic_connect_protocol::plugins::share::SharePlugin;
-                                    if let Some(share_plugin) = plugin.as_any_mut().downcast_mut::<SharePlugin>() {
+                                    if let Some(share_plugin) =
+                                        plugin.as_any_mut().downcast_mut::<SharePlugin>()
+                                    {
                                         share_plugin.set_tls_config(tls_config.clone());
-                                        debug!("Set TLS config on SharePlugin for device {}", device_id);
+                                        debug!(
+                                            "Set TLS config on SharePlugin for device {}",
+                                            device_id
+                                        );
                                     }
                                 }
 
@@ -1409,7 +1453,10 @@ impl Daemon {
                                                     device_id, e
                                                 );
                                             } else {
-                                                info!("Contacts DB initialized for device {}", device_id);
+                                                info!(
+                                                    "Contacts DB initialized for device {}",
+                                                    device_id
+                                                );
                                             }
                                         }
 
@@ -1419,7 +1466,10 @@ impl Daemon {
                                                 device_id, e
                                             );
                                         } else {
-                                            info!("Contacts signals initialized for device {}", device_id);
+                                            info!(
+                                                "Contacts signals initialized for device {}",
+                                                device_id
+                                            );
                                         }
                                     }
                                 }
@@ -1661,9 +1711,12 @@ impl Daemon {
 
                                 if !is_keepalive {
                                     // Show notification for regular pings only
-                                    let message = packet.body.get("message").and_then(|v| v.as_str());
+                                    let message =
+                                        packet.body.get("message").and_then(|v| v.as_str());
 
-                                    if let Err(e) = notifier.notify_ping(&device_name, message).await {
+                                    if let Err(e) =
+                                        notifier.notify_ping(&device_name, message).await
+                                    {
                                         warn!("Failed to send ping notification: {}", e);
                                     }
                                 } else {
@@ -1713,28 +1766,52 @@ impl Daemon {
                                             .unwrap_or(false);
 
                                         if is_messaging {
-                                            let web_url = packet
-                                                .body
-                                                .get("webUrl")
-                                                .and_then(|v| v.as_str());
+                                            let web_url =
+                                                packet.body.get("webUrl").and_then(|v| v.as_str());
 
                                             if let Err(e) = notifier
-                                                .notify_messaging(&device_name, app_name, title, text, web_url)
+                                                .notify_messaging(
+                                                    &device_name,
+                                                    app_name,
+                                                    title,
+                                                    text,
+                                                    web_url,
+                                                )
                                                 .await
                                             {
-                                                warn!("Failed to send messaging notification: {}", e);
+                                                warn!(
+                                                    "Failed to send messaging notification: {}",
+                                                    e
+                                                );
                                             }
 
                                             // Emit D-Bus signal for cosmic-messages
                                             if let Some(dbus) = &dbus_server {
-                                                let conv_id = packet.body.get("conversationId").and_then(|v| v.as_str()).unwrap_or("");
-                                                if let Err(e) = dbus.emit_messaging_notification(app_name, title, text, conv_id).await {
-                                                    warn!("Failed to emit messaging D-Bus signal: {}", e);
+                                                let conv_id = packet
+                                                    .body
+                                                    .get("conversationId")
+                                                    .and_then(|v| v.as_str())
+                                                    .unwrap_or("");
+                                                if let Err(e) = dbus
+                                                    .emit_messaging_notification(
+                                                        app_name, title, text, conv_id,
+                                                    )
+                                                    .await
+                                                {
+                                                    warn!(
+                                                        "Failed to emit messaging D-Bus signal: {}",
+                                                        e
+                                                    );
                                                 }
                                             }
                                         } else {
                                             if let Err(e) = notifier
-                                                .notify_from_device(&device_name, app_name, title, text)
+                                                .notify_from_device(
+                                                    &device_name,
+                                                    app_name,
+                                                    title,
+                                                    text,
+                                                )
                                                 .await
                                             {
                                                 warn!("Failed to send device notification: {}", e);
@@ -2174,7 +2251,9 @@ impl Daemon {
         dbus_server: &Option<Arc<DbusServer>>,
         _error_handler: &ErrorHandler,
         connection_manager: &Arc<RwLock<ConnectionManager>>,
-        connection_attempts: &Arc<RwLock<std::collections::HashMap<String, (std::time::Instant, u32)>>>,
+        connection_attempts: &Arc<
+            RwLock<std::collections::HashMap<String, (std::time::Instant, u32)>>,
+        >,
     ) -> Result<()> {
         match event {
             DiscoveryEvent::DeviceDiscovered {
@@ -2188,7 +2267,7 @@ impl Daemon {
                 ..
             } => {
                 let device_id = info.device_id.clone();
-                
+
                 // Update registry
                 {
                     let mut manager = device_manager.write().await;
@@ -2218,20 +2297,25 @@ impl Daemon {
 
                     // Exponential backoff: 2^count seconds (cap at 60s)
                     let backoff = Duration::from_secs(2u64.pow((*count).min(6) as u32));
-                    
+
                     if now.duration_since(*last_attempt) >= backoff {
-                        info!("Auto-connecting to trusted device {} (attempt {})", device_id, count);
+                        info!(
+                            "Auto-connecting to trusted device {} (attempt {})",
+                            device_id, count
+                        );
                         *last_attempt = now;
                         *count += 1;
-                        
+
                         // Try to connect
                         let mgr = connection_manager.read().await;
                         // Need to extract SocketAddr from TransportAddress if it's TCP
                         // DiscoveryService usually returns TransportAddress::Tcp for UDP discovery results
-                        if let cosmic_connect_protocol::transport::TransportAddress::Tcp(addr) = transport_address {
+                        if let cosmic_connect_protocol::transport::TransportAddress::Tcp(addr) =
+                            transport_address
+                        {
                             let device_id_clone = device_id.clone();
                             let socket_addr = *addr;
-                            
+
                             let mgr_arc = connection_manager.clone();
                             tokio::spawn(async move {
                                 let mgr = mgr_arc.read().await;
@@ -2269,9 +2353,12 @@ impl Daemon {
                 // We don't mark as disconnected here, ConnectionManager handles TCP timeout.
                 // But we can emit a signal if needed.
                 if let Some(dbus) = dbus_server {
-                    if let Err(e) = dbus.emit_device_state_changed(&device_id, "reachable").await {
-                         // Just updating reachability state logic handled in list_devices mostly
-                         warn!("Failed to emit state change: {}", e);
+                    if let Err(e) = dbus
+                        .emit_device_state_changed(&device_id, "reachable")
+                        .await
+                    {
+                        // Just updating reachability state logic handled in list_devices mostly
+                        warn!("Failed to emit state change: {}", e);
                     }
                 }
             }
@@ -2423,11 +2510,7 @@ impl Daemon {
 ///
 /// Returns true if the packet was an internal packet and was handled,
 /// false if it should be forwarded to the connection manager.
-async fn handle_internal_packet(
-    dbus: &dbus::DbusServer,
-    device_id: &str,
-    packet: &Packet,
-) -> bool {
+async fn handle_internal_packet(dbus: &dbus::DbusServer, device_id: &str, packet: &Packet) -> bool {
     match packet.packet_type.as_str() {
         "cconnect.internal.screenshare.requested" => {
             if let Err(e) = dbus.emit_screen_share_requested(device_id).await {
@@ -2489,7 +2572,16 @@ async fn handle_internal_packet(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(3) as u8;
             if let Err(e) = dbus
-                .emit_screen_share_annotation(device_id, annotation_type, x1, y1, x2, y2, color, width)
+                .emit_screen_share_annotation(
+                    device_id,
+                    annotation_type,
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    color,
+                    width,
+                )
                 .await
             {
                 error!("Failed to emit screen_share_annotation signal: {}", e);

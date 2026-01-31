@@ -170,7 +170,11 @@ impl ConnectivityReportPlugin {
 
     /// Get signal info for a specific subscription
     pub async fn get_signal_info(&self, subscription_id: &str) -> Option<SignalInfo> {
-        self.signal_strengths.read().await.get(subscription_id).cloned()
+        self.signal_strengths
+            .read()
+            .await
+            .get(subscription_id)
+            .cloned()
     }
 
     /// Get the primary (first) signal info
@@ -678,7 +682,9 @@ mod tests {
         let other = Packet::new("other.packet", json!({}));
 
         assert!(ConnectivityReportPlugin::is_connectivity_packet(&cconnect));
-        assert!(ConnectivityReportPlugin::is_connectivity_packet(&kdeconnect));
+        assert!(ConnectivityReportPlugin::is_connectivity_packet(
+            &kdeconnect
+        ));
         assert!(!ConnectivityReportPlugin::is_connectivity_packet(&other));
     }
 

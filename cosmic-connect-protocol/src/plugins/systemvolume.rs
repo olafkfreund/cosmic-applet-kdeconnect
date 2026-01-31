@@ -331,10 +331,7 @@ impl SystemVolumePlugin {
         let sinks = AudioBackend::list_sinks();
 
         // Build ID map and sink info list
-        let id_map: HashMap<String, u32> = sinks
-            .iter()
-            .map(|s| (s.id.to_string(), s.id))
-            .collect();
+        let id_map: HashMap<String, u32> = sinks.iter().map(|s| (s.id.to_string(), s.id)).collect();
         let sink_list: Vec<SinkInfo> = sinks.into_iter().map(SinkInfo::from).collect();
 
         // Update cache
@@ -598,7 +595,13 @@ mod tests {
         Device::from_discovery(info)
     }
 
-    fn create_test_sink(id: u32, name: &str, volume: i32, muted: bool, is_default: bool) -> SinkInfo {
+    fn create_test_sink(
+        id: u32,
+        name: &str,
+        volume: i32,
+        muted: bool,
+        is_default: bool,
+    ) -> SinkInfo {
         SinkInfo {
             name: id.to_string(),
             description: name.to_string(),
@@ -792,10 +795,7 @@ mod tests {
         let packet = plugin.create_volume_request(Some("50".to_string()), 75);
 
         assert_eq!(packet.packet_type, PACKET_TYPE_SYSTEMVOLUME_REQUEST);
-        assert_eq!(
-            packet.body.get("name").and_then(|v| v.as_str()),
-            Some("50")
-        );
+        assert_eq!(packet.body.get("name").and_then(|v| v.as_str()), Some("50"));
         assert_eq!(packet.body.get("volume").and_then(|v| v.as_i64()), Some(75));
         assert_eq!(
             packet.body.get("requestSinks").and_then(|v| v.as_bool()),
@@ -809,10 +809,7 @@ mod tests {
         let packet = plugin.create_mute_request(Some("50".to_string()), true);
 
         assert_eq!(packet.packet_type, PACKET_TYPE_SYSTEMVOLUME_REQUEST);
-        assert_eq!(
-            packet.body.get("name").and_then(|v| v.as_str()),
-            Some("50")
-        );
+        assert_eq!(packet.body.get("name").and_then(|v| v.as_str()), Some("50"));
         assert_eq!(
             packet.body.get("muted").and_then(|v| v.as_bool()),
             Some(true)
@@ -849,16 +846,14 @@ mod tests {
     #[test]
     fn test_sink_list_response_serialization() {
         let response = SinkListResponse {
-            sink_list: vec![
-                SinkInfo {
-                    name: "50".to_string(),
-                    description: "Test Speaker".to_string(),
-                    volume: 75,
-                    muted: false,
-                    max_volume: 150,
-                    enabled: true,
-                },
-            ],
+            sink_list: vec![SinkInfo {
+                name: "50".to_string(),
+                description: "Test Speaker".to_string(),
+                volume: 75,
+                muted: false,
+                max_volume: 150,
+                enabled: true,
+            }],
         };
 
         let json = serde_json::to_value(&response).unwrap();

@@ -590,7 +590,6 @@ impl MouseKeyboardSharePlugin {
             .inject_key(event.key_code as u16, event.pressed, modifiers)
             .await
     }
-
 }
 
 impl Default for MouseKeyboardSharePlugin {

@@ -169,18 +169,19 @@ impl ContactsDatabase {
         );
 
         let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction().map_err(|e| {
-            ProtocolError::Plugin(format!("Failed to start transaction: {}", e))
-        })?;
+        let tx = conn
+            .transaction()
+            .map_err(|e| ProtocolError::Plugin(format!("Failed to start transaction: {}", e)))?;
 
         // Check if contact exists and is newer
-        let existing_timestamp: Option<i64> = tx.query_row(
-            "SELECT timestamp FROM contacts WHERE uid = ? AND device_id = ?",
-            params![contact.uid, contact.device_id],
-            |row| row.get(0),
-        ).optional().map_err(|e| {
-            ProtocolError::Plugin(format!("Failed to query contact: {}", e))
-        })?;
+        let existing_timestamp: Option<i64> = tx
+            .query_row(
+                "SELECT timestamp FROM contacts WHERE uid = ? AND device_id = ?",
+                params![contact.uid, contact.device_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| ProtocolError::Plugin(format!("Failed to query contact: {}", e)))?;
 
         if let Some(ts) = existing_timestamp {
             if ts >= contact.timestamp {
@@ -208,24 +209,29 @@ impl ContactsDatabase {
                 contact.timestamp,
                 chrono::Utc::now().timestamp_millis()
             ],
-        ).map_err(|e| ProtocolError::Plugin(format!("Failed to upsert contact: {}", e)))?;
+        )
+        .map_err(|e| ProtocolError::Plugin(format!("Failed to upsert contact: {}", e)))?;
 
-        let contact_id: i64 = tx.query_row(
-            "SELECT id FROM contacts WHERE uid = ? AND device_id = ?",
-            params![contact.uid, contact.device_id],
-            |row| row.get(0),
-        ).map_err(|e| ProtocolError::Plugin(format!("Failed to get contact ID: {}", e)))?;
+        let contact_id: i64 = tx
+            .query_row(
+                "SELECT id FROM contacts WHERE uid = ? AND device_id = ?",
+                params![contact.uid, contact.device_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| ProtocolError::Plugin(format!("Failed to get contact ID: {}", e)))?;
 
         // Delete existing phones and emails
         tx.execute(
             "DELETE FROM contact_phones WHERE contact_id = ?",
             params![contact_id],
-        ).map_err(|e| ProtocolError::Plugin(format!("Failed to delete phones: {}", e)))?;
+        )
+        .map_err(|e| ProtocolError::Plugin(format!("Failed to delete phones: {}", e)))?;
 
         tx.execute(
             "DELETE FROM contact_emails WHERE contact_id = ?",
             params![contact_id],
-        ).map_err(|e| ProtocolError::Plugin(format!("Failed to delete emails: {}", e)))?;
+        )
+        .map_err(|e| ProtocolError::Plugin(format!("Failed to delete emails: {}", e)))?;
 
         // Insert phones
         for phone in contact.phone_numbers {
@@ -240,12 +246,12 @@ impl ContactsDatabase {
             tx.execute(
                 "INSERT INTO contact_emails (contact_id, email, email_type) VALUES (?, ?, ?)",
                 params![contact_id, email.address, email.email_type],
-            ).map_err(|e| ProtocolError::Plugin(format!("Failed to insert email: {}", e)))?;
+            )
+            .map_err(|e| ProtocolError::Plugin(format!("Failed to insert email: {}", e)))?;
         }
 
-        tx.commit().map_err(|e| {
-            ProtocolError::Plugin(format!("Failed to commit transaction: {}", e))
-        })?;
+        tx.commit()
+            .map_err(|e| ProtocolError::Plugin(format!("Failed to commit transaction: {}", e)))?;
 
         info!(
             "Contact upserted: {} ({})",
@@ -262,47 +268,66 @@ impl ContactsDatabase {
 
         let conn = self.conn.lock().unwrap();
 
-        let contact_row = conn.query_row(
-            "SELECT id, device_id, name, vcard_data, timestamp FROM contacts WHERE uid = ?",
-            params![uid],
-            |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, i64>(4)?,
-                ))
-            },
-        ).optional().map_err(|e| ProtocolError::Plugin(format!("Failed to query contact: {}", e)))?;
+        let contact_row = conn
+            .query_row(
+                "SELECT id, device_id, name, vcard_data, timestamp FROM contacts WHERE uid = ?",
+                params![uid],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|e| ProtocolError::Plugin(format!("Failed to query contact: {}", e)))?;
 
         if let Some((id, device_id, name, vcard_data, timestamp)) = contact_row {
             // Fetch phones
-            let mut stmt = conn.prepare("SELECT phone_number, phone_type FROM contact_phones WHERE contact_id = ?").map_err(|e| ProtocolError::Plugin(format!("Failed to prepare phone query: {}", e)))?;
-            let phone_rows = stmt.query_map(params![id], |row| {
-                Ok(PhoneNumber {
-                    number: row.get(0)?,
-                    phone_type: row.get(1)?,
+            let mut stmt = conn
+                .prepare("SELECT phone_number, phone_type FROM contact_phones WHERE contact_id = ?")
+                .map_err(|e| {
+                    ProtocolError::Plugin(format!("Failed to prepare phone query: {}", e))
+                })?;
+            let phone_rows = stmt
+                .query_map(params![id], |row| {
+                    Ok(PhoneNumber {
+                        number: row.get(0)?,
+                        phone_type: row.get(1)?,
+                    })
                 })
-            }).map_err(|e| ProtocolError::Plugin(format!("Failed to query phones: {}", e)))?;
+                .map_err(|e| ProtocolError::Plugin(format!("Failed to query phones: {}", e)))?;
 
             let mut phone_numbers = Vec::new();
             for phone in phone_rows {
-                phone_numbers.push(phone.map_err(|e| ProtocolError::Plugin(format!("Failed to read phone row: {}", e)))?);
+                phone_numbers.push(phone.map_err(|e| {
+                    ProtocolError::Plugin(format!("Failed to read phone row: {}", e))
+                })?);
             }
 
             // Fetch emails
-            let mut stmt = conn.prepare("SELECT email, email_type FROM contact_emails WHERE contact_id = ?").map_err(|e| ProtocolError::Plugin(format!("Failed to prepare email query: {}", e)))?;
-            let email_rows = stmt.query_map(params![id], |row| {
-                Ok(Email {
-                    address: row.get(0)?,
-                    email_type: row.get(1)?,
+            let mut stmt = conn
+                .prepare("SELECT email, email_type FROM contact_emails WHERE contact_id = ?")
+                .map_err(|e| {
+                    ProtocolError::Plugin(format!("Failed to prepare email query: {}", e))
+                })?;
+            let email_rows = stmt
+                .query_map(params![id], |row| {
+                    Ok(Email {
+                        address: row.get(0)?,
+                        email_type: row.get(1)?,
+                    })
                 })
-            }).map_err(|e| ProtocolError::Plugin(format!("Failed to query emails: {}", e)))?;
+                .map_err(|e| ProtocolError::Plugin(format!("Failed to query emails: {}", e)))?;
 
             let mut emails = Vec::new();
             for email in email_rows {
-                emails.push(email.map_err(|e| ProtocolError::Plugin(format!("Failed to read email row: {}", e)))?);
+                emails.push(email.map_err(|e| {
+                    ProtocolError::Plugin(format!("Failed to read email row: {}", e))
+                })?);
             }
 
             Ok(Some(Contact {
@@ -324,13 +349,19 @@ impl ContactsDatabase {
         debug!("Fetching contacts for device: {}", device_id);
 
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT uid FROM contacts WHERE device_id = ? ORDER BY name ASC").map_err(|e| ProtocolError::Plugin(format!("Failed to prepare contacts query: {}", e)))?;
-        
-        let uids_iter = stmt.query_map(params![device_id], |row| {
-            row.get::<_, String>(0)
-        }).map_err(|e| ProtocolError::Plugin(format!("Failed to query contact UIDs: {}", e)))?;
+        let mut stmt = conn
+            .prepare("SELECT uid FROM contacts WHERE device_id = ? ORDER BY name ASC")
+            .map_err(|e| {
+                ProtocolError::Plugin(format!("Failed to prepare contacts query: {}", e))
+            })?;
 
-        let uids: Vec<String> = uids_iter.collect::<std::result::Result<Vec<_>, _>>().map_err(|e| ProtocolError::Plugin(format!("Failed to collect UIDs: {}", e)))?;
+        let uids_iter = stmt
+            .query_map(params![device_id], |row| row.get::<_, String>(0))
+            .map_err(|e| ProtocolError::Plugin(format!("Failed to query contact UIDs: {}", e)))?;
+
+        let uids: Vec<String> = uids_iter
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| ProtocolError::Plugin(format!("Failed to collect UIDs: {}", e)))?;
         drop(stmt);
         drop(conn); // Release lock
 
@@ -349,13 +380,18 @@ impl ContactsDatabase {
         debug!("Fetching all contacts");
 
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare("SELECT uid FROM contacts ORDER BY name ASC").map_err(|e| ProtocolError::Plugin(format!("Failed to prepare contacts query: {}", e)))?;
-        
-        let uids: Vec<String> = stmt.query_map([], |row| {
-            row.get(0)
-        }).map_err(|e| ProtocolError::Plugin(format!("Failed to query contact UIDs: {}", e)))?
-        .collect::<std::result::Result<Vec<_>, _>>().map_err(|e| ProtocolError::Plugin(format!("Failed to collect UIDs: {}", e)))?;
-        
+        let mut stmt = conn
+            .prepare("SELECT uid FROM contacts ORDER BY name ASC")
+            .map_err(|e| {
+                ProtocolError::Plugin(format!("Failed to prepare contacts query: {}", e))
+            })?;
+
+        let uids: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .map_err(|e| ProtocolError::Plugin(format!("Failed to query contact UIDs: {}", e)))?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| ProtocolError::Plugin(format!("Failed to collect UIDs: {}", e)))?;
+
         drop(stmt);
         drop(conn);
 
@@ -374,7 +410,8 @@ impl ContactsDatabase {
         debug!("Deleting contact: {}", uid);
 
         let conn = self.conn.lock().unwrap();
-        let count = conn.execute("DELETE FROM contacts WHERE uid = ?", params![uid])
+        let count = conn
+            .execute("DELETE FROM contacts WHERE uid = ?", params![uid])
             .map_err(|e| ProtocolError::Plugin(format!("Failed to delete contact: {}", e)))?;
 
         Ok(count > 0)
@@ -385,8 +422,14 @@ impl ContactsDatabase {
         debug!("Deleting all contacts for device: {}", device_id);
 
         let conn = self.conn.lock().unwrap();
-        let count = conn.execute("DELETE FROM contacts WHERE device_id = ?", params![device_id])
-            .map_err(|e| ProtocolError::Plugin(format!("Failed to delete device contacts: {}", e)))?;
+        let count = conn
+            .execute(
+                "DELETE FROM contacts WHERE device_id = ?",
+                params![device_id],
+            )
+            .map_err(|e| {
+                ProtocolError::Plugin(format!("Failed to delete device contacts: {}", e))
+            })?;
 
         Ok(count)
     }
@@ -397,22 +440,25 @@ impl ContactsDatabase {
         let search_pattern = format!("%{}%", query);
 
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT DISTINCT c.uid 
+        let mut stmt = conn
+            .prepare(
+                "SELECT DISTINCT c.uid 
              FROM contacts c
              LEFT JOIN contact_phones p ON c.id = p.contact_id
              LEFT JOIN contact_emails e ON c.id = e.contact_id
              WHERE c.name LIKE ?1 
                 OR p.phone_number LIKE ?1 
                 OR e.email LIKE ?1
-             ORDER BY c.name ASC"
-        ).map_err(|e| ProtocolError::Plugin(format!("Failed to prepare search query: {}", e)))?;
-        
-        let uids: Vec<String> = stmt.query_map(params![search_pattern], |row| {
-            row.get(0)
-        }).map_err(|e| ProtocolError::Plugin(format!("Failed to query search UIDs: {}", e)))?
-        .collect::<std::result::Result<Vec<_>, _>>().map_err(|e| ProtocolError::Plugin(format!("Failed to collect search UIDs: {}", e)))?;
-        
+             ORDER BY c.name ASC",
+            )
+            .map_err(|e| ProtocolError::Plugin(format!("Failed to prepare search query: {}", e)))?;
+
+        let uids: Vec<String> = stmt
+            .query_map(params![search_pattern], |row| row.get(0))
+            .map_err(|e| ProtocolError::Plugin(format!("Failed to query search UIDs: {}", e)))?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| ProtocolError::Plugin(format!("Failed to collect search UIDs: {}", e)))?;
+
         drop(stmt);
         drop(conn);
 
@@ -429,7 +475,8 @@ impl ContactsDatabase {
     /// Get contact count
     pub async fn get_contact_count(&self) -> Result<usize> {
         let conn = self.conn.lock().unwrap();
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM contacts", [], |row| row.get(0))
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM contacts", [], |row| row.get(0))
             .map_err(|e| ProtocolError::Plugin(format!("Failed to count contacts: {}", e)))?;
 
         Ok(count as usize)

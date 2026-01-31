@@ -252,7 +252,11 @@ impl Plugin for PingPlugin {
         vec!["cconnect.ping".to_string()]
     }
 
-    async fn init(&mut self, device: &Device, _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>) -> Result<()> {
+    async fn init(
+        &mut self,
+        device: &Device,
+        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+    ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
         info!("Ping plugin initialized for device {}", device.name());
         Ok(())
@@ -355,7 +359,10 @@ mod tests {
         let device = create_test_device();
 
         // Initialize
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         assert!(plugin.device_id.is_some());
 
         // Start
@@ -390,7 +397,10 @@ mod tests {
     async fn test_handle_ping_without_message() {
         let mut plugin = PingPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         let mut device = create_test_device();
         let packet = Packet::new("cconnect.ping", json!({}));
@@ -404,7 +414,10 @@ mod tests {
     async fn test_handle_ping_with_message() {
         let mut plugin = PingPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         let mut device = create_test_device();
         let packet = Packet::new("cconnect.ping", json!({ "message": "Test message" }));
@@ -418,7 +431,10 @@ mod tests {
     async fn test_multiple_pings() {
         let mut plugin = PingPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         let mut device = create_test_device();
 
@@ -435,7 +451,10 @@ mod tests {
     async fn test_ignore_non_ping_packets() {
         let mut plugin = PingPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         let mut device = create_test_device();
         let packet = Packet::new("cconnect.battery", json!({}));

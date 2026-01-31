@@ -81,9 +81,14 @@ impl DiscoveryService {
                 Ok(socket)
             }
             Err(e) => {
-                warn!("Failed to bind to primary port {}: {}. Trying fallback range...", DISCOVERY_PORT, e);
+                warn!(
+                    "Failed to bind to primary port {}: {}. Trying fallback range...",
+                    DISCOVERY_PORT, e
+                );
                 for port in PORT_RANGE_START..=PORT_RANGE_END {
-                    if port == DISCOVERY_PORT { continue; }
+                    if port == DISCOVERY_PORT {
+                        continue;
+                    }
                     if let Ok(socket) = UdpSocket::bind(("0.0.0.0", port)) {
                         info!("Bound to fallback UDP port {}", port);
                         socket.set_broadcast(true)?;
@@ -91,7 +96,10 @@ impl DiscoveryService {
                         return Ok(socket);
                     }
                 }
-                Err(ProtocolError::Io(std::io::Error::new(std::io::ErrorKind::AddrInUse, "Failed to bind to any port")))
+                Err(ProtocolError::Io(std::io::Error::new(
+                    std::io::ErrorKind::AddrInUse,
+                    "Failed to bind to any port",
+                )))
             }
         }
     }
@@ -139,9 +147,8 @@ impl DiscoveryService {
             };
 
             // Build list of all broadcast addresses
-            let mut broadcast_addrs = vec![
-                SocketAddr::new(IpAddr::V4(BROADCAST_ADDR), DISCOVERY_PORT),
-            ];
+            let mut broadcast_addrs =
+                vec![SocketAddr::new(IpAddr::V4(BROADCAST_ADDR), DISCOVERY_PORT)];
             for addr in &additional_addrs {
                 broadcast_addrs.push(SocketAddr::new(IpAddr::V4(*addr), DISCOVERY_PORT));
             }
@@ -200,7 +207,17 @@ impl DiscoveryService {
             loop {
                 match socket.recv_from(&mut buf) {
                     Ok((size, src_addr)) => {
-                        if let Err(e) = Self::handle_packet(&buf[..size], src_addr, &own_device_id, &own_device_info, &socket, &event_tx, &last_seen).await {
+                        if let Err(e) = Self::handle_packet(
+                            &buf[..size],
+                            src_addr,
+                            &own_device_id,
+                            &own_device_info,
+                            &socket,
+                            &event_tx,
+                            &last_seen,
+                        )
+                        .await
+                        {
                             debug!("Error handling packet from {}: {}", src_addr, e);
                         }
                     }
@@ -216,12 +233,27 @@ impl DiscoveryService {
         });
     }
 
-    async fn handle_packet(data: &[u8], src_addr: SocketAddr, own_device_id: &str, _own_device_info: &DeviceInfo, _socket: &UdpSocket, event_tx: &mpsc::UnboundedSender<DiscoveryEvent>, last_seen: &Arc<RwLock<HashMap<String, u64>>>) -> Result<()> {
+    async fn handle_packet(
+        data: &[u8],
+        src_addr: SocketAddr,
+        own_device_id: &str,
+        _own_device_info: &DeviceInfo,
+        _socket: &UdpSocket,
+        event_tx: &mpsc::UnboundedSender<DiscoveryEvent>,
+        last_seen: &Arc<RwLock<HashMap<String, u64>>>,
+    ) -> Result<()> {
         let packet = Packet::from_bytes(data)?;
-        if !packet.is_type("cconnect.identity") { return Ok(()); }
+        if !packet.is_type("cconnect.identity") {
+            return Ok(());
+        }
         let device_info = DeviceInfo::from_identity_packet(&packet)?;
-        if device_info.device_id == own_device_id { return Ok(()); }
-        let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        if device_info.device_id == own_device_id {
+            return Ok(());
+        }
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
         let mut last_seen_map = last_seen.write().await;
         let is_new = !last_seen_map.contains_key(&device_info.device_id);
         last_seen_map.insert(device_info.device_id.clone(), current_time);
@@ -229,7 +261,12 @@ impl DiscoveryService {
         let mut tcp_addr = src_addr;
         tcp_addr.set_port(device_info.tcp_port);
         let event = if is_new {
-            info!("Discovered new device: {} ({}) at {}", device_info.device_name, device_info.device_type.as_str(), tcp_addr);
+            info!(
+                "Discovered new device: {} ({}) at {}",
+                device_info.device_name,
+                device_info.device_type.as_str(),
+                tcp_addr
+            );
             DiscoveryEvent::tcp_discovered(device_info, tcp_addr)
         } else {
             DiscoveryEvent::tcp_updated(device_info, tcp_addr)
@@ -246,7 +283,10 @@ impl DiscoveryService {
             let mut interval = interval(Duration::from_secs(5));
             loop {
                 interval.tick().await;
-                let current_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+                let current_time = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
                 let mut last_seen_map = last_seen.write().await;
                 let mut timed_out = Vec::new();
                 for (id, &last_time) in last_seen_map.iter() {

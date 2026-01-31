@@ -95,10 +95,7 @@ impl BluetoothConnection {
         let ch = channel.unwrap_or(RFCOMM_CHANNEL);
         let socket_addr = SocketAddr::new(bt_addr, ch);
 
-        debug!(
-            "Connecting to RFCOMM socket: {} channel {}",
-            bt_addr, ch
-        );
+        debug!("Connecting to RFCOMM socket: {} channel {}", bt_addr, ch);
 
         // Connect with timeout
         let stream = timeout(BT_TIMEOUT, Stream::connect(socket_addr))
@@ -350,10 +347,7 @@ impl BluetoothListener {
             .await
             .map_err(|e| ProtocolError::Io(std::io::Error::other(e)))?;
 
-        info!(
-            "Accepted Bluetooth connection from {}",
-            remote_addr.addr
-        );
+        info!("Accepted Bluetooth connection from {}", remote_addr.addr);
 
         let connection = BluetoothConnection::from_stream(stream, remote_addr.addr);
         Ok((connection, remote_addr.addr))
@@ -405,22 +399,25 @@ impl BluetoothProfileService {
             ..Default::default()
         };
 
-        debug!("Registering RFCOMM profile with UUID: {}", CCONNECT_SERVICE_UUID);
+        debug!(
+            "Registering RFCOMM profile with UUID: {}",
+            CCONNECT_SERVICE_UUID
+        );
 
         // Register the profile
-        let profile_handle = session
-            .register_profile(profile)
-            .await
-            .map_err(|e| {
-                error!("Failed to register Bluetooth profile: {}", e);
-                ProtocolError::Io(std::io::Error::other(e))
-            })?;
+        let profile_handle = session.register_profile(profile).await.map_err(|e| {
+            error!("Failed to register Bluetooth profile: {}", e);
+            ProtocolError::Io(std::io::Error::other(e))
+        })?;
 
         info!(
             "Bluetooth profile registered successfully on channel {}",
             RFCOMM_CHANNEL
         );
-        info!("SDP service record created with UUID: {}", CCONNECT_SERVICE_UUID);
+        info!(
+            "SDP service record created with UUID: {}",
+            CCONNECT_SERVICE_UUID
+        );
 
         Ok(Self {
             session,
@@ -436,16 +433,12 @@ impl BluetoothProfileService {
         debug!("Waiting for incoming connection via SDP profile...");
 
         // Wait for a connection request
-        let req = self
-            .profile_handle
-            .next()
-            .await
-            .ok_or_else(|| {
-                ProtocolError::Io(std::io::Error::new(
-                    std::io::ErrorKind::BrokenPipe,
-                    "Profile handle closed",
-                ))
-            })?;
+        let req = self.profile_handle.next().await.ok_or_else(|| {
+            ProtocolError::Io(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "Profile handle closed",
+            ))
+        })?;
 
         let device_addr = req.device();
         info!("Connection request from device: {}", device_addr);
@@ -525,8 +518,7 @@ impl TransportFactory for BluetoothTransportFactory {
                 address,
                 service_uuid: _,
             } => {
-                let connection =
-                    BluetoothConnection::connect(address, Some(self.channel)).await?;
+                let connection = BluetoothConnection::connect(address, Some(self.channel)).await?;
                 Ok(Box::new(connection))
             }
             _ => Err(ProtocolError::InvalidPacket(

@@ -608,7 +608,10 @@ mod tests {
 
         let result = plugin.handle_packet(&packet, &mut device).await;
         assert!(result.is_ok());
-        assert_eq!(plugin.get_mac_address(), Some("AA:BB:CC:DD:EE:FF".to_string()));
+        assert_eq!(
+            plugin.get_mac_address(),
+            Some("AA:BB:CC:DD:EE:FF".to_string())
+        );
     }
 
     #[test]
@@ -629,11 +632,17 @@ mod tests {
 
         // Set MAC address
         plugin.set_mac_address("11:22:33:44:55:66".to_string());
-        assert_eq!(plugin.get_mac_address(), Some("11:22:33:44:55:66".to_string()));
+        assert_eq!(
+            plugin.get_mac_address(),
+            Some("11:22:33:44:55:66".to_string())
+        );
 
         // Update MAC address
         plugin.set_mac_address("AA:BB:CC:DD:EE:FF".to_string());
-        assert_eq!(plugin.get_mac_address(), Some("AA:BB:CC:DD:EE:FF".to_string()));
+        assert_eq!(
+            plugin.get_mac_address(),
+            Some("AA:BB:CC:DD:EE:FF".to_string())
+        );
     }
 
     #[test]
@@ -648,7 +657,10 @@ mod tests {
         plugin.set_mac_address("00:11:22:33:44:55".to_string());
 
         // Arc should reflect the change
-        assert_eq!(*state.read().unwrap(), Some("00:11:22:33:44:55".to_string()));
+        assert_eq!(
+            *state.read().unwrap(),
+            Some("00:11:22:33:44:55".to_string())
+        );
     }
 
     #[test]

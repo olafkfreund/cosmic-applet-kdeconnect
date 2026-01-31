@@ -168,7 +168,12 @@ impl UPowerBackend {
     ) -> Result<(), String> {
         // Get OnBattery property
         if let Ok(value) = self
-            .get_property_bool(conn, "/org/freedesktop/UPower", "org.freedesktop.UPower", "OnBattery")
+            .get_property_bool(
+                conn,
+                "/org/freedesktop/UPower",
+                "org.freedesktop.UPower",
+                "OnBattery",
+            )
             .await
         {
             status.on_battery = value;
@@ -177,7 +182,12 @@ impl UPowerBackend {
 
         // Get LidIsClosed property
         if let Ok(value) = self
-            .get_property_bool(conn, "/org/freedesktop/UPower", "org.freedesktop.UPower", "LidIsClosed")
+            .get_property_bool(
+                conn,
+                "/org/freedesktop/UPower",
+                "org.freedesktop.UPower",
+                "LidIsClosed",
+            )
             .await
         {
             status.lid_is_closed = value;
@@ -186,7 +196,12 @@ impl UPowerBackend {
 
         // Get LidIsPresent property
         if let Ok(value) = self
-            .get_property_bool(conn, "/org/freedesktop/UPower", "org.freedesktop.UPower", "LidIsPresent")
+            .get_property_bool(
+                conn,
+                "/org/freedesktop/UPower",
+                "org.freedesktop.UPower",
+                "LidIsPresent",
+            )
             .await
         {
             status.lid_is_present = value;
@@ -207,7 +222,12 @@ impl UPowerBackend {
 
         // Get IsPresent
         if let Ok(value) = self
-            .get_property_bool(conn, &battery_path, "org.freedesktop.UPower.Device", "IsPresent")
+            .get_property_bool(
+                conn,
+                &battery_path,
+                "org.freedesktop.UPower.Device",
+                "IsPresent",
+            )
             .await
         {
             status.battery_present = value;
@@ -216,7 +236,12 @@ impl UPowerBackend {
 
         // Get Percentage
         if let Ok(value) = self
-            .get_property_f64(conn, &battery_path, "org.freedesktop.UPower.Device", "Percentage")
+            .get_property_f64(
+                conn,
+                &battery_path,
+                "org.freedesktop.UPower.Device",
+                "Percentage",
+            )
             .await
         {
             status.battery_percentage = Some(value);
@@ -225,7 +250,12 @@ impl UPowerBackend {
 
         // Get State
         if let Ok(value) = self
-            .get_property_u32(conn, &battery_path, "org.freedesktop.UPower.Device", "State")
+            .get_property_u32(
+                conn,
+                &battery_path,
+                "org.freedesktop.UPower.Device",
+                "State",
+            )
             .await
         {
             status.battery_state = BatteryState::from(value);
@@ -234,7 +264,12 @@ impl UPowerBackend {
 
         // Get TimeToEmpty
         if let Ok(value) = self
-            .get_property_i64(conn, &battery_path, "org.freedesktop.UPower.Device", "TimeToEmpty")
+            .get_property_i64(
+                conn,
+                &battery_path,
+                "org.freedesktop.UPower.Device",
+                "TimeToEmpty",
+            )
             .await
         {
             if value > 0 {
@@ -245,7 +280,12 @@ impl UPowerBackend {
 
         // Get TimeToFull
         if let Ok(value) = self
-            .get_property_i64(conn, &battery_path, "org.freedesktop.UPower.Device", "TimeToFull")
+            .get_property_i64(
+                conn,
+                &battery_path,
+                "org.freedesktop.UPower.Device",
+                "TimeToFull",
+            )
             .await
         {
             if value > 0 {
@@ -289,7 +329,9 @@ impl UPowerBackend {
         interface: &str,
         property: &str,
     ) -> Result<bool, String> {
-        let variant = self.get_property_raw(conn, path, interface, property).await?;
+        let variant = self
+            .get_property_raw(conn, path, interface, property)
+            .await?;
         variant
             .downcast_ref::<bool>()
             .map_err(|e| format!("Property {} is not a bool: {}", property, e))
@@ -303,7 +345,9 @@ impl UPowerBackend {
         interface: &str,
         property: &str,
     ) -> Result<f64, String> {
-        let variant = self.get_property_raw(conn, path, interface, property).await?;
+        let variant = self
+            .get_property_raw(conn, path, interface, property)
+            .await?;
         variant
             .downcast_ref::<f64>()
             .map_err(|e| format!("Property {} is not a f64: {}", property, e))
@@ -317,7 +361,9 @@ impl UPowerBackend {
         interface: &str,
         property: &str,
     ) -> Result<u32, String> {
-        let variant = self.get_property_raw(conn, path, interface, property).await?;
+        let variant = self
+            .get_property_raw(conn, path, interface, property)
+            .await?;
         variant
             .downcast_ref::<u32>()
             .map_err(|e| format!("Property {} is not a u32: {}", property, e))
@@ -331,7 +377,9 @@ impl UPowerBackend {
         interface: &str,
         property: &str,
     ) -> Result<i64, String> {
-        let variant = self.get_property_raw(conn, path, interface, property).await?;
+        let variant = self
+            .get_property_raw(conn, path, interface, property)
+            .await?;
         variant
             .downcast_ref::<i64>()
             .map_err(|e| format!("Property {} is not an i64: {}", property, e))

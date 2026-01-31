@@ -33,17 +33,18 @@ impl StreamReceiver {
     /// Bind to a random port and return it
     pub async fn listen(&mut self) -> Result<u16> {
         // Bind to port 0 (random available port)
-        let listener = TcpListener::bind("0.0.0.0:0").await.map_err(|e| {
-            crate::ProtocolError::Io(e)
-        })?;
-        
-        let port = listener.local_addr().map_err(|e| {
-            crate::ProtocolError::Io(e)
-        })?.port();
-        
+        let listener = TcpListener::bind("0.0.0.0:0")
+            .await
+            .map_err(|e| crate::ProtocolError::Io(e))?;
+
+        let port = listener
+            .local_addr()
+            .map_err(|e| crate::ProtocolError::Io(e))?
+            .port();
+
         info!("StreamReceiver listening on port {}", port);
         self.listener = Some(listener);
-        
+
         Ok(port)
     }
 
@@ -51,66 +52,78 @@ impl StreamReceiver {
     pub async fn accept(&mut self) -> Result<()> {
         if let Some(listener) = &self.listener {
             info!("Waiting for incoming stream connection...");
-            let (stream, addr) = listener.accept().await.map_err(|e| {
-                crate::ProtocolError::Io(e)
-            })?;
-            
+            let (stream, addr) = listener
+                .accept()
+                .await
+                .map_err(|e| crate::ProtocolError::Io(e))?;
+
             info!("Accepted stream connection from {}", addr);
             self.active_stream = Some(stream);
             Ok(())
         } else {
-            Err(crate::ProtocolError::InvalidState("Listener not initialized".to_string()))
+            Err(crate::ProtocolError::InvalidState(
+                "Listener not initialized".to_string(),
+            ))
         }
     }
 
     /// Receive and parse the next frame from the stream
-    /// 
+    ///
     /// Returns (frame_type, timestamp, payload)
     pub async fn next_frame(&mut self) -> Result<(u8, u64, Vec<u8>)> {
         if let Some(stream) = &mut self.active_stream {
             // Header structure:
             // Magic (4B) | Type (1B) | Timestamp (8B) | Size (4B)
             // Total header size: 17 bytes
-            
+
             let mut header = [0u8; 17];
-            
+
             // Read header
-            stream.read_exact(&mut header).await.map_err(|e| {
-                crate::ProtocolError::Io(e)
-            })?;
-            
+            stream
+                .read_exact(&mut header)
+                .await
+                .map_err(|e| crate::ProtocolError::Io(e))?;
+
             // Verify magic
             if &header[0..4] != MAGIC_HEADER {
-                return Err(crate::ProtocolError::InvalidPacket("Invalid stream magic header".to_string()));
+                return Err(crate::ProtocolError::InvalidPacket(
+                    "Invalid stream magic header".to_string(),
+                ));
             }
-            
+
             let frame_type = header[4];
-            
+
             let mut ts_bytes = [0u8; 8];
             ts_bytes.copy_from_slice(&header[5..13]);
             let timestamp = u64::from_be_bytes(ts_bytes);
-            
+
             let mut size_bytes = [0u8; 4];
             size_bytes.copy_from_slice(&header[13..17]);
             let payload_size = u32::from_be_bytes(size_bytes) as usize;
-            
+
             // Sanity check size (e.g. max 10MB frame)
             if payload_size > 10 * 1024 * 1024 {
-                return Err(crate::ProtocolError::PacketSizeExceeded(payload_size, 10 * 1024 * 1024));
+                return Err(crate::ProtocolError::PacketSizeExceeded(
+                    payload_size,
+                    10 * 1024 * 1024,
+                ));
             }
-            
+
             // Read payload
             let mut payload = vec![0u8; payload_size];
-            stream.read_exact(&mut payload).await.map_err(|e| {
-                crate::ProtocolError::Io(e)
-            })?;
-            
+            stream
+                .read_exact(&mut payload)
+                .await
+                .map_err(|e| crate::ProtocolError::Io(e))?;
+
             Ok((frame_type, timestamp, payload))
         } else {
-            Err(crate::ProtocolError::InvalidState("No active stream".to_string()))
+            Err(crate::ProtocolError::InvalidState(
+                "No active stream".to_string(),
+            ))
         }
     }
-    
+
     /// Close the connection
     pub async fn close(&mut self) {
         if let Some(mut stream) = self.active_stream.take() {

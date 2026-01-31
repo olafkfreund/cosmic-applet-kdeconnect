@@ -187,8 +187,7 @@ impl SystemdInhibitor {
 
         // Duplicate the FD before zbus's OwnedFd drops it
         let raw_fd = fd.as_raw_fd();
-        let dup_fd = nix::unistd::dup(raw_fd)
-            .map_err(|e| format!("Failed to dup FD: {}", e))?;
+        let dup_fd = nix::unistd::dup(raw_fd).map_err(|e| format!("Failed to dup FD: {}", e))?;
         // Safety: dup returns a valid file descriptor
         let owned_fd = unsafe { OwnedFd::from_raw_fd(dup_fd) };
 

@@ -166,14 +166,10 @@ impl MprisBackend {
         .await
         .map_err(|e| format!("Failed to create player proxy: {}", e))?;
 
-        let mpris_proxy = zbus::Proxy::new(
-            conn,
-            bus_name.as_str(),
-            MPRIS_OBJECT_PATH,
-            MPRIS_INTERFACE,
-        )
-        .await
-        .map_err(|e| format!("Failed to create MPRIS proxy: {}", e))?;
+        let mpris_proxy =
+            zbus::Proxy::new(conn, bus_name.as_str(), MPRIS_OBJECT_PATH, MPRIS_INTERFACE)
+                .await
+                .map_err(|e| format!("Failed to create MPRIS proxy: {}", e))?;
 
         // Query properties with defaults
         let playback_status: String = player_proxy

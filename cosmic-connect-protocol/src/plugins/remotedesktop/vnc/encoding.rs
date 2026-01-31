@@ -6,9 +6,7 @@
 //! - H.264: Video compression (TODO: Phase 3)
 //! - Hextile: VNC standard tile-based encoding (TODO: Phase 4)
 
-use crate::plugins::remotedesktop::capture::{
-    EncodedFrame, EncodingType, QualityPreset, RawFrame,
-};
+use crate::plugins::remotedesktop::capture::{EncodedFrame, EncodingType, QualityPreset, RawFrame};
 use crate::Result;
 use std::time::Instant;
 use tracing::{debug, info, warn};

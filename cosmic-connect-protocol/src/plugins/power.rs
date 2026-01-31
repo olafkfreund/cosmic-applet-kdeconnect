@@ -745,7 +745,10 @@ mod tests {
         // Set inhibited with reason
         plugin.set_inhibition_state(true, Some("File transfer".to_string()));
         assert!(plugin.is_sleep_inhibited());
-        assert_eq!(plugin.get_inhibit_reason(), Some("File transfer".to_string()));
+        assert_eq!(
+            plugin.get_inhibit_reason(),
+            Some("File transfer".to_string())
+        );
 
         // Clear inhibition
         plugin.set_inhibition_state(false, None);

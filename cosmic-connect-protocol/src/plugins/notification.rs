@@ -673,7 +673,11 @@ impl Plugin for NotificationPlugin {
         ]
     }
 
-    async fn init(&mut self, device: &Device, _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>) -> Result<()> {
+    async fn init(
+        &mut self,
+        device: &Device,
+        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+    ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
         info!(
             "Notification plugin initialized for device {}",
@@ -699,11 +703,17 @@ impl Plugin for NotificationPlugin {
     async fn handle_packet(&mut self, packet: &Packet, device: &mut Device) -> Result<()> {
         if packet.is_type("cconnect.notification") || packet.is_type("kdeconnect.notification") {
             self.handle_notification(packet, device);
-        } else if packet.is_type("cconnect.notification.request") || packet.is_type("kdeconnect.notification.request") {
+        } else if packet.is_type("cconnect.notification.request")
+            || packet.is_type("kdeconnect.notification.request")
+        {
             self.handle_request(packet, device);
-        } else if packet.is_type("cconnect.notification.action") || packet.is_type("kdeconnect.notification.action") {
+        } else if packet.is_type("cconnect.notification.action")
+            || packet.is_type("kdeconnect.notification.action")
+        {
             self.handle_action(packet, device);
-        } else if packet.is_type("cconnect.notification.reply") || packet.is_type("kdeconnect.notification.reply") {
+        } else if packet.is_type("cconnect.notification.reply")
+            || packet.is_type("kdeconnect.notification.reply")
+        {
             self.handle_reply(packet, device);
         }
         Ok(())
@@ -830,7 +840,10 @@ mod tests {
         let mut plugin = NotificationPlugin::new();
         let device = create_test_device();
 
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         assert!(plugin.device_id.is_some());
 
         plugin.start().await.unwrap();
@@ -891,7 +904,10 @@ mod tests {
     async fn test_handle_notification() {
         let mut plugin = NotificationPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         let mut device = create_test_device();
         let notif = Notification::new("123", "Messages", "New Message", "Hello!", true);
@@ -908,7 +924,10 @@ mod tests {
     async fn test_handle_cancel_notification() {
         let mut plugin = NotificationPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         let mut device = create_test_device();
 
@@ -931,7 +950,10 @@ mod tests {
     async fn test_get_all_notifications() {
         let mut plugin = NotificationPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         let mut device = create_test_device();
 
@@ -956,7 +978,10 @@ mod tests {
     async fn test_ignore_non_notification_packets() {
         let mut plugin = NotificationPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         let mut device = create_test_device();
         let packet = Packet::new("cconnect.ping", json!({}));

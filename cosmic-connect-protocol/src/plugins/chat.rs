@@ -698,7 +698,11 @@ impl Plugin for ChatPlugin {
         ]
     }
 
-    async fn init(&mut self, device: &Device, _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>) -> Result<()> {
+    async fn init(
+        &mut self,
+        device: &Device,
+        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+    ) -> Result<()> {
         let device_id = device.id().to_string();
         self.device_id = Some(device_id.clone());
 
@@ -744,9 +748,7 @@ impl Plugin for ChatPlugin {
             "cconnect.chat.typing" | "kdeconnect.chat.typing" => {
                 self.handle_typing(packet, device).await
             }
-            "cconnect.chat.read" | "kdeconnect.chat.read" => {
-                self.handle_read(packet, device).await
-            }
+            "cconnect.chat.read" | "kdeconnect.chat.read" => self.handle_read(packet, device).await,
             "cconnect.chat.history" | "kdeconnect.chat.history" => {
                 self.handle_history_request(packet, device).await
             }
@@ -910,7 +912,10 @@ mod tests {
         let mut plugin = ChatPlugin::new();
         let device = create_test_device();
 
-        assert!(plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.is_ok());
+        assert!(plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .is_ok());
         assert!(plugin.start().await.is_ok());
         assert!(plugin.enabled);
         assert!(plugin.stop().await.is_ok());
@@ -937,7 +942,10 @@ mod tests {
     async fn test_handle_incoming_message() {
         let mut plugin = ChatPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         let mut device = create_test_device();

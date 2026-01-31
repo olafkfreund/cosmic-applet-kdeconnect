@@ -151,11 +151,7 @@ impl EdgeDetector {
         debug!("Starting edge detection loop");
 
         while self.running.load(Ordering::SeqCst) {
-            let poll_interval = self
-                .config
-                .read()
-                .map(|c| c.poll_interval_ms)
-                .unwrap_or(5);
+            let poll_interval = self.config.read().map(|c| c.poll_interval_ms).unwrap_or(5);
 
             if let Some((x, y)) = self.input_backend.cursor_position() {
                 if let Some(event) = self.check_edges(x, y) {
@@ -270,7 +266,13 @@ impl EdgeDetector {
     }
 
     /// Check if cursor is in a corner dead zone
-    fn is_in_corner_dead_zone(&self, x: i32, y: i32, screen: &ScreenGeometry, dead_zone: i32) -> bool {
+    fn is_in_corner_dead_zone(
+        &self,
+        x: i32,
+        y: i32,
+        screen: &ScreenGeometry,
+        dead_zone: i32,
+    ) -> bool {
         let near_left = x < screen.x + dead_zone;
         let near_right = x > screen.right() - dead_zone;
         let near_top = y < screen.y + dead_zone;
@@ -279,7 +281,13 @@ impl EdgeDetector {
     }
 
     /// Detect which edge the cursor is at, if any
-    fn detect_edge(&self, x: i32, y: i32, screen: &ScreenGeometry, threshold: i32) -> Option<ScreenEdge> {
+    fn detect_edge(
+        &self,
+        x: i32,
+        y: i32,
+        screen: &ScreenGeometry,
+        threshold: i32,
+    ) -> Option<ScreenEdge> {
         if x <= screen.x + threshold {
             Some(ScreenEdge::Left)
         } else if x >= screen.right() - threshold {
@@ -403,8 +411,12 @@ mod tests {
         let remote = create_remote_screen();
 
         // Middle of right edge
-        let (rx, ry) =
-            EdgeDetector::calculate_remote_position((1919, 540), &local, &remote, ScreenEdge::Right);
+        let (rx, ry) = EdgeDetector::calculate_remote_position(
+            (1919, 540),
+            &local,
+            &remote,
+            ScreenEdge::Right,
+        );
 
         assert_eq!(rx, 0); // Left edge of remote
         assert_eq!(ry, 720); // Middle height
@@ -429,8 +441,12 @@ mod tests {
         let remote = create_remote_screen();
 
         // Middle of bottom edge
-        let (rx, ry) =
-            EdgeDetector::calculate_remote_position((960, 1079), &local, &remote, ScreenEdge::Bottom);
+        let (rx, ry) = EdgeDetector::calculate_remote_position(
+            (960, 1079),
+            &local,
+            &remote,
+            ScreenEdge::Bottom,
+        );
 
         assert_eq!(rx, 1280); // Middle width
         assert_eq!(ry, 0); // Top edge of remote

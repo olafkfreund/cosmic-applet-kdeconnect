@@ -616,7 +616,10 @@ impl ProtocolError {
                 format!("Feature not available: {}.", msg)
             }
             ProtocolError::Database(msg) => {
-                format!("Database error: {}. Contact synchronization may be affected.", msg)
+                format!(
+                    "Database error: {}. Contact synchronization may be affected.",
+                    msg
+                )
             }
         }
     }

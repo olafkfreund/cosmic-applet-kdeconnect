@@ -482,7 +482,10 @@ impl ConnectionManager {
                 // Bug fix: If device doesn't exist, create it from the identity packet
                 // This handles incoming TLS connections where discovery hasn't occurred yet
                 if dm.get_device(id).is_none() {
-                    info!("Device {} not in registry, creating from identity packet", id);
+                    info!(
+                        "Device {} not in registry, creating from identity packet",
+                        id
+                    );
                     match DeviceInfo::from_identity_packet(&packet) {
                         Ok(device_info) => {
                             let device = Device::from_discovery(device_info);

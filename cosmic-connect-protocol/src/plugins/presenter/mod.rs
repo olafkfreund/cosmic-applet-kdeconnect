@@ -155,7 +155,11 @@ impl Plugin for PresenterPlugin {
         vec![]
     }
 
-    async fn init(&mut self, device: &Device, _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>) -> Result<()> {
+    async fn init(
+        &mut self,
+        device: &Device,
+        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+    ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
         info!("Presenter plugin initialized for device {}", device.name());
         Ok(())
@@ -233,7 +237,10 @@ mod tests {
         let mut plugin = PresenterPlugin::new();
         let device = create_test_device();
 
-        assert!(plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.is_ok());
+        assert!(plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .is_ok());
         assert_eq!(plugin.device_id, Some(device.id().to_string()));
     }
 
@@ -241,7 +248,10 @@ mod tests {
     async fn test_handle_pointer_movement() {
         let mut plugin = PresenterPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         let packet = Packet::new(
             "cconnect.presenter",
@@ -263,7 +273,10 @@ mod tests {
     async fn test_handle_stop_event() {
         let mut plugin = PresenterPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         // Start presentation
         plugin.presentation_active = true;
@@ -303,7 +316,10 @@ mod tests {
         let mut plugin = PresenterPlugin::new();
         let device = create_test_device();
 
-        assert!(plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.is_ok());
+        assert!(plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .is_ok());
         assert!(plugin.start().await.is_ok());
 
         // Simulate presentation activity
@@ -319,7 +335,10 @@ mod tests {
     async fn test_laser_pointer_movement() {
         let mut plugin = PresenterPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         // First movement - should start presentation and show laser pointer
         let packet1 = Packet::new(

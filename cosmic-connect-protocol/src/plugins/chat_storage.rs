@@ -68,8 +68,8 @@ impl ChatSqliteStorage {
                 .map_err(|e| format!("Failed to create db directory: {}", e))?;
         }
 
-        let conn = Connection::open(db_path)
-            .map_err(|e| format!("Failed to open database: {}", e))?;
+        let conn =
+            Connection::open(db_path).map_err(|e| format!("Failed to open database: {}", e))?;
 
         let storage = Self {
             conn: Arc::new(Mutex::new(conn)),
@@ -141,7 +141,10 @@ impl ChatSqliteStorage {
         )
         .map_err(|e| format!("Failed to insert message: {}", e))?;
 
-        debug!("Added message {} for device {}", message.message_id, self.device_id);
+        debug!(
+            "Added message {} for device {}",
+            message.message_id, self.device_id
+        );
 
         // Cleanup old messages
         drop(conn);
@@ -188,7 +191,10 @@ impl ChatSqliteStorage {
             debug!("Marked message {} as read", message_id);
             Ok(true)
         } else {
-            warn!("Message {} not found for device {}", message_id, self.device_id);
+            warn!(
+                "Message {} not found for device {}",
+                message_id, self.device_id
+            );
             Ok(false)
         }
     }
@@ -222,7 +228,10 @@ impl ChatSqliteStorage {
                 .map_err(|e| format!("Failed to prepare query: {}", e))?;
 
             let rows = stmt
-                .query_map(params![self.device_id, before, limit as i64], row_to_message)
+                .query_map(
+                    params![self.device_id, before, limit as i64],
+                    row_to_message,
+                )
                 .map_err(|e| format!("Failed to query messages: {}", e))?;
             rows.filter_map(Result::ok).collect()
         } else {

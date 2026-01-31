@@ -60,8 +60,8 @@ pub async fn request_screencast() -> Result<PortalSession> {
             &session,
             CursorMode::Embedded, // Include cursor in the stream
             SourceType::Monitor | SourceType::Window,
-            false, // multiple: allow selecting one source
-            None,  // restore_token: no previous session to restore
+            false,              // multiple: allow selecting one source
+            None,               // restore_token: no previous session to restore
             PersistMode::DoNot, // don't persist this session
         )
         .await
@@ -102,15 +102,15 @@ pub async fn request_screencast() -> Result<PortalSession> {
     debug!("Got PipeWire node ID: {}", node_id);
 
     // Open the PipeWire remote
-    let fd = screencast.open_pipe_wire_remote(&session).await.map_err(|e| {
-        error!("Failed to open PipeWire remote: {}", e);
-        crate::ProtocolError::Plugin(format!("PipeWire remote failed: {}", e))
-    })?;
+    let fd = screencast
+        .open_pipe_wire_remote(&session)
+        .await
+        .map_err(|e| {
+            error!("Failed to open PipeWire remote: {}", e);
+            crate::ProtocolError::Plugin(format!("PipeWire remote failed: {}", e))
+        })?;
 
-    info!(
-        "Screen share permission granted: node_id={}",
-        node_id
-    );
+    info!("Screen share permission granted: node_id={}", node_id);
 
     Ok(PortalSession {
         pipewire_fd: fd,

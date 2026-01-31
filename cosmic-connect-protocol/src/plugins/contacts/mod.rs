@@ -398,7 +398,11 @@ impl Plugin for ContactsPlugin {
         ]
     }
 
-    async fn init(&mut self, device: &Device, packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>) -> Result<()> {
+    async fn init(
+        &mut self,
+        device: &Device,
+        packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+    ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
         self.packet_sender = Some(packet_sender);
         info!("Contacts plugin initialized for device {}", device.name());

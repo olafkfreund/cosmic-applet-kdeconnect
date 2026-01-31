@@ -410,13 +410,19 @@ impl SystemMonitorPlugin {
 
         for line in meminfo_content.lines() {
             if let Some(value) = line.strip_prefix("MemTotal:") {
-                mem_total = value.split_whitespace().next()
+                mem_total = value
+                    .split_whitespace()
+                    .next()
                     .and_then(|v| v.parse::<u64>().ok())
-                    .unwrap_or(0) * 1024;
+                    .unwrap_or(0)
+                    * 1024;
             } else if let Some(value) = line.strip_prefix("MemAvailable:") {
-                mem_available = value.split_whitespace().next()
+                mem_available = value
+                    .split_whitespace()
+                    .next()
                     .and_then(|v| v.parse::<u64>().ok())
-                    .unwrap_or(0) * 1024;
+                    .unwrap_or(0)
+                    * 1024;
             }
         }
 
@@ -562,7 +568,9 @@ impl SystemMonitorPlugin {
             processes.sort_by(|a, b| {
                 let cpu_a = a["cpu"].as_f64().unwrap_or(0.0);
                 let cpu_b = b["cpu"].as_f64().unwrap_or(0.0);
-                cpu_b.partial_cmp(&cpu_a).unwrap_or(std::cmp::Ordering::Equal)
+                cpu_b
+                    .partial_cmp(&cpu_a)
+                    .unwrap_or(std::cmp::Ordering::Equal)
             });
 
             processes.truncate(limit);
@@ -593,8 +601,11 @@ impl SystemMonitorPlugin {
         let memory = fs::read_to_string(format!("/proc/{pid}/statm"))
             .ok()
             .and_then(|content| {
-                content.split_whitespace().nth(1)?
-                    .parse::<u64>().ok()
+                content
+                    .split_whitespace()
+                    .nth(1)?
+                    .parse::<u64>()
+                    .ok()
                     .map(|rss| rss * 4096)
             })
             .unwrap_or(0);
@@ -615,7 +626,8 @@ impl SystemMonitorPlugin {
     async fn handle_request(&mut self, packet: &Packet, device: &Device) -> Result<()> {
         debug!("Handling system monitor request from {}", device.name());
 
-        let request_type = packet.body
+        let request_type = packet
+            .body
             .get("requestType")
             .and_then(|v| v.as_str())
             .unwrap_or("stats");
@@ -630,11 +642,17 @@ impl SystemMonitorPlugin {
                 }
 
                 let response = Packet::new("cconnect.systemmonitor.stats", stats_json);
-                debug!("System stats collected for {}: {:?}", device.name(), response.body);
+                debug!(
+                    "System stats collected for {}: {:?}",
+                    device.name(),
+                    response.body
+                );
                 // TODO: Send response packet through device connection
             }
             "processes" => {
-                let limit = packet.body.get("limit")
+                let limit = packet
+                    .body
+                    .get("limit")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(10) as usize;
 
@@ -642,13 +660,19 @@ impl SystemMonitorPlugin {
                 let process_list = self.collect_process_list(limit);
 
                 if let Some(processes_array) = process_list.get("processes") {
-                    if let Ok(processes) = serde_json::from_value::<Vec<ProcessInfo>>(processes_array.clone()) {
+                    if let Ok(processes) =
+                        serde_json::from_value::<Vec<ProcessInfo>>(processes_array.clone())
+                    {
                         self.update_processes(processes);
                     }
                 }
 
                 let response = Packet::new("cconnect.systemmonitor.processes", process_list);
-                debug!("Process list collected for {}: {:?}", device.name(), response.body);
+                debug!(
+                    "Process list collected for {}: {:?}",
+                    device.name(),
+                    response.body
+                );
                 // TODO: Send response packet through device connection
             }
             _ => {

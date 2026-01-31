@@ -1012,16 +1012,16 @@ impl Plugin for FileSyncPlugin {
         self
     }
 
-            fn as_any_mut(&mut self) -> &mut dyn Any {
-                self
-            }
-    
-            fn incoming_capabilities(&self) -> Vec<String> {
-                vec![
-                    INCOMING_CAPABILITY.to_string(),
-                    "kdeconnect.filesync".to_string(),
-                ]
-            }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn incoming_capabilities(&self) -> Vec<String> {
+        vec![
+            INCOMING_CAPABILITY.to_string(),
+            "kdeconnect.filesync".to_string(),
+        ]
+    }
     fn outgoing_capabilities(&self) -> Vec<String> {
         vec![OUTGOING_CAPABILITY.to_string()]
     }
@@ -1163,9 +1163,11 @@ impl Plugin for FileSyncPlugin {
                 .to_string();
 
             let config: SyncFolder =
-                serde_json::from_value(packet.body.get("config").cloned().ok_or_else(
-                    || ProtocolError::InvalidPacket("Missing config".to_string()),
-                )?)
+                serde_json::from_value(
+                    packet.body.get("config").cloned().ok_or_else(|| {
+                        ProtocolError::InvalidPacket("Missing config".to_string())
+                    })?,
+                )
                 .map_err(|e| ProtocolError::InvalidPacket(e.to_string()))?;
 
             self.configure_folder(folder_id, config.local_path, config.conflict_strategy)
@@ -1241,8 +1243,7 @@ impl Plugin for FileSyncPlugin {
                             }
                         }
                         SyncAction::DeleteLocal(path) => {
-                            if let Some(config) = self.sync_folders.read().await.get(&folder_id)
-                            {
+                            if let Some(config) = self.sync_folders.read().await.get(&folder_id) {
                                 let local_path = config.local_path.join(&path);
                                 if local_path.exists() {
                                     if let Err(e) = tokio::fs::remove_file(&local_path).await {

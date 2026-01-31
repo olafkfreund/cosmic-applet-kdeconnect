@@ -630,14 +630,20 @@ mod tests {
         // Receive locked state from remote device
         let packet = Packet::new("cconnect.lock", json!({ "isLocked": true }));
         let mut test_device = create_test_device();
-        plugin.handle_packet(&packet, &mut test_device).await.unwrap();
+        plugin
+            .handle_packet(&packet, &mut test_device)
+            .await
+            .unwrap();
 
         // State should be updated
         assert!(plugin.is_locked());
 
         // Receive unlocked state
         let packet = Packet::new("cconnect.lock", json!({ "isLocked": false }));
-        plugin.handle_packet(&packet, &mut test_device).await.unwrap();
+        plugin
+            .handle_packet(&packet, &mut test_device)
+            .await
+            .unwrap();
 
         assert!(!plugin.is_locked());
     }

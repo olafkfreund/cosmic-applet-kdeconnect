@@ -249,7 +249,11 @@ impl LogindBackend {
     // rather than the Session interface
 
     /// Execute a power action via logind Manager interface
-    async fn execute_power_action(&mut self, method: &str, interactive: bool) -> Result<(), String> {
+    async fn execute_power_action(
+        &mut self,
+        method: &str,
+        interactive: bool,
+    ) -> Result<(), String> {
         self.ensure_connected().await?;
         let conn = self.connection.as_ref().ok_or("Not connected")?;
 
@@ -378,9 +382,9 @@ impl LogindBackend {
         property: &str,
     ) -> Result<String, String> {
         let variant = self.get_property_raw(conn, path, property).await?;
-        variant
-            .try_into()
-            .map_err(|e: zbus::zvariant::Error| format!("Property {} is not a string: {}", property, e))
+        variant.try_into().map_err(|e: zbus::zvariant::Error| {
+            format!("Property {} is not a string: {}", property, e)
+        })
     }
 
     /// Check if logind service is available

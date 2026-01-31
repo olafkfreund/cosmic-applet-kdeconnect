@@ -49,7 +49,10 @@ impl ClipboardSqliteStorage {
     }
 
     /// Create storage with explicit database path (for testing)
-    pub fn new_with_path(config: ClipboardHistoryConfig, db_path: &PathBuf) -> Result<Self, String> {
+    pub fn new_with_path(
+        config: ClipboardHistoryConfig,
+        db_path: &PathBuf,
+    ) -> Result<Self, String> {
         // Ensure parent directory exists
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)

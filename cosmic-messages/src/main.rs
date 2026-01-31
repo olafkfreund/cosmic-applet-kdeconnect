@@ -1,6 +1,6 @@
 use cosmic::app::{Core, Task};
 use cosmic::iced::Length;
-use cosmic::widget::{self, container, text, button};
+use cosmic::widget::{self, button, container, text};
 use cosmic::Element;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -66,8 +66,12 @@ impl cosmic::Application for CosmicMessages {
     type Message = Message;
     const APP_ID: &'static str = "org.cosmicde.Messages";
 
-    fn core(&self) -> &Core { &self.core }
-    fn core_mut(&mut self) -> &mut Core { &mut self.core }
+    fn core(&self) -> &Core {
+        &self.core
+    }
+    fn core_mut(&mut self) -> &mut Core {
+        &mut self.core
+    }
 
     fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Message>) {
         (
@@ -76,7 +80,7 @@ impl cosmic::Application for CosmicMessages {
                 current_messenger: MessengerType::GoogleMessages,
                 webview: Some(Arc::new(Mutex::new(None))),
             },
-            Task::none()
+            Task::none(),
         )
     }
 
@@ -110,21 +114,30 @@ impl cosmic::Application for CosmicMessages {
 
     fn view(&self) -> Element<Message> {
         let tabs = widget::row::with_children(vec![
-            button::text("Google Messages").on_press(Message::SwitchMessenger(MessengerType::GoogleMessages)).into(),
-            button::text("WhatsApp").on_press(Message::SwitchMessenger(MessengerType::WhatsApp)).into(),
-            button::text("Telegram").on_press(Message::SwitchMessenger(MessengerType::Telegram)).into(),
+            button::text("Google Messages")
+                .on_press(Message::SwitchMessenger(MessengerType::GoogleMessages))
+                .into(),
+            button::text("WhatsApp")
+                .on_press(Message::SwitchMessenger(MessengerType::WhatsApp))
+                .into(),
+            button::text("Telegram")
+                .on_press(Message::SwitchMessenger(MessengerType::Telegram))
+                .into(),
         ])
         .spacing(10)
         .padding(10);
 
         widget::column::with_children(vec![
             tabs.into(),
-            container(text::body("WebView would be here (requires window handle integration)"))
-                .width(Length::Fill)
-                .height(Length::Fill)
-                .center(Length::Fill)
-                .into(),
-        ]).into()
+            container(text::body(
+                "WebView would be here (requires window handle integration)",
+            ))
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center(Length::Fill)
+            .into(),
+        ])
+        .into()
     }
 }
 

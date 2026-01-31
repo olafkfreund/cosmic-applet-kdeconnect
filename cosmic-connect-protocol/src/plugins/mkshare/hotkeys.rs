@@ -278,8 +278,16 @@ impl HotkeyManager {
             return;
         }
 
-        let modifiers = self.pressed_modifiers.read().map(|g| *g).unwrap_or_default();
-        let pressed = self.pressed_keys.read().map(|g| g.clone()).unwrap_or_default();
+        let modifiers = self
+            .pressed_modifiers
+            .read()
+            .map(|g| *g)
+            .unwrap_or_default();
+        let pressed = self
+            .pressed_keys
+            .read()
+            .map(|g| g.clone())
+            .unwrap_or_default();
 
         for keycode in pressed {
             self.on_key_press(keycode, modifiers);

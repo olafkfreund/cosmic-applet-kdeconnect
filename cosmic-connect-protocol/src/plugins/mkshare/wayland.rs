@@ -136,7 +136,11 @@ impl InputCapture for WaylandInputBackend {
     }
 
     fn screen_geometry(&self) -> Vec<ScreenGeometry> {
-        self.screens.read().ok().map(|g| g.clone()).unwrap_or_default()
+        self.screens
+            .read()
+            .ok()
+            .map(|g| g.clone())
+            .unwrap_or_default()
     }
 
     fn subscribe(&self) -> broadcast::Receiver<InputEvent> {
@@ -338,7 +342,9 @@ mod tests {
         let mut receiver = backend.subscribe();
 
         // Send an event
-        let _ = backend.event_tx.send(InputEvent::MouseMove { dx: 10, dy: 20 });
+        let _ = backend
+            .event_tx
+            .send(InputEvent::MouseMove { dx: 10, dy: 20 });
 
         // Receive it
         let event = receiver.try_recv();

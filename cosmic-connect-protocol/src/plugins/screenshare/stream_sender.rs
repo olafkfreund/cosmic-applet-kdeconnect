@@ -70,14 +70,14 @@ impl StreamSender {
         let addr = format!("{}:{}", host, port);
         info!("Connecting to viewer at {}", addr);
 
-        let stream = TcpStream::connect(&addr).await.map_err(|e| {
-            crate::ProtocolError::Io(e)
-        })?;
+        let stream = TcpStream::connect(&addr)
+            .await
+            .map_err(|e| crate::ProtocolError::Io(e))?;
 
         // Set TCP_NODELAY for low latency
-        stream.set_nodelay(true).map_err(|e| {
-            crate::ProtocolError::Io(e)
-        })?;
+        stream
+            .set_nodelay(true)
+            .map_err(|e| crate::ProtocolError::Io(e))?;
 
         info!("Connected to viewer at {}", addr);
         self.stream = Some(stream);
@@ -112,8 +112,15 @@ impl StreamSender {
     }
 
     /// Send a frame with the specified type
-    async fn send_frame(&mut self, frame_type: FrameType, timestamp_ns: u64, payload: &[u8]) -> Result<()> {
-        let stream = self.stream.as_mut()
+    async fn send_frame(
+        &mut self,
+        frame_type: FrameType,
+        timestamp_ns: u64,
+        payload: &[u8],
+    ) -> Result<()> {
+        let stream = self
+            .stream
+            .as_mut()
             .ok_or_else(|| crate::ProtocolError::InvalidState("Not connected".to_string()))?;
 
         // Build header (17 bytes total)
@@ -152,9 +159,10 @@ impl StreamSender {
     /// Flush the stream
     pub async fn flush(&mut self) -> Result<()> {
         if let Some(stream) = &mut self.stream {
-            stream.flush().await.map_err(|e| {
-                crate::ProtocolError::Io(e)
-            })?;
+            stream
+                .flush()
+                .await
+                .map_err(|e| crate::ProtocolError::Io(e))?;
         }
         Ok(())
     }
@@ -165,8 +173,10 @@ impl StreamSender {
             // Try to send end of stream marker
             let _ = self.send_end_of_stream().await;
             let _ = stream.shutdown().await;
-            info!("Stream sender closed: {} frames, {} bytes sent",
-                self.frames_sent, self.bytes_sent);
+            info!(
+                "Stream sender closed: {} frames, {} bytes sent",
+                self.frames_sent, self.bytes_sent
+            );
         }
     }
 

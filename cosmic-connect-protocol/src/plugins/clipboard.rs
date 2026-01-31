@@ -809,7 +809,10 @@ mod tests {
         let device = create_test_device();
 
         // Initialize
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         assert!(plugin.device_id.is_some());
 
         // Start
@@ -895,7 +898,10 @@ mod tests {
     async fn test_handle_clipboard_update() {
         let mut plugin = ClipboardPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         let mut device = create_test_device();
@@ -914,7 +920,10 @@ mod tests {
     async fn test_handle_clipboard_connect_newer() {
         let mut plugin = ClipboardPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         // Set old content
@@ -944,7 +953,10 @@ mod tests {
     async fn test_handle_clipboard_connect_older() {
         let mut plugin = ClipboardPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         // Set current content
@@ -974,7 +986,10 @@ mod tests {
     async fn test_handle_clipboard_connect_zero_timestamp() {
         let mut plugin = ClipboardPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         // Set current content
@@ -1004,7 +1019,10 @@ mod tests {
     async fn test_handle_empty_clipboard() {
         let mut plugin = ClipboardPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         // Set initial content
@@ -1025,7 +1043,10 @@ mod tests {
     async fn test_multiple_updates() {
         let mut plugin = ClipboardPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         let mut device = create_test_device();
@@ -1049,7 +1070,10 @@ mod tests {
     async fn test_sync_loop_prevention() {
         let mut plugin = ClipboardPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         // Set current state

@@ -59,7 +59,11 @@ impl AudioBackend {
             }
 
             // Detect end of Sinks section (next section starts)
-            if in_audio_sinks && (line.contains("├─ Sources:") || line.contains("├─ Filters:") || line.contains("└─ Streams:")) {
+            if in_audio_sinks
+                && (line.contains("├─ Sources:")
+                    || line.contains("├─ Filters:")
+                    || line.contains("└─ Streams:"))
+            {
                 break;
             }
 

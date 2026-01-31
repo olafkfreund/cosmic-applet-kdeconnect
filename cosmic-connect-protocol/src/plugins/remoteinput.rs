@@ -396,7 +396,11 @@ impl Plugin for RemoteInputPlugin {
         vec![PACKET_TYPE_MOUSEPAD_KEYBOARDSTATE.to_string()]
     }
 
-    async fn init(&mut self, device: &Device, _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>) -> Result<()> {
+    async fn init(
+        &mut self,
+        device: &Device,
+        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+    ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
         info!(
             "Remote Input plugin initialized for device {}",
@@ -416,7 +420,9 @@ impl Plugin for RemoteInputPlugin {
     }
 
     async fn handle_packet(&mut self, packet: &Packet, _device: &mut Device) -> Result<()> {
-        if packet.is_type(PACKET_TYPE_MOUSEPAD_REQUEST) || packet.is_type("kdeconnect.mousepad.request") {
+        if packet.is_type(PACKET_TYPE_MOUSEPAD_REQUEST)
+            || packet.is_type("kdeconnect.mousepad.request")
+        {
             debug!("Received remote input request");
             self.handle_request(packet).await
         } else {
@@ -472,7 +478,10 @@ mod tests {
         let mut plugin = RemoteInputPlugin::new();
         let device = create_test_device();
 
-        assert!(plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.is_ok());
+        assert!(plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .is_ok());
         assert_eq!(plugin.device_id, Some(device.id().to_string()));
     }
 
@@ -480,7 +489,10 @@ mod tests {
     async fn test_handle_mouse_movement() {
         let mut plugin = RemoteInputPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         let packet = Packet::new(
             "cconnect.mousepad.request",
@@ -499,7 +511,10 @@ mod tests {
     async fn test_handle_mouse_click() {
         let mut plugin = RemoteInputPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         let packet = Packet::new(
             "cconnect.mousepad.request",
@@ -517,7 +532,10 @@ mod tests {
     async fn test_handle_keyboard_input() {
         let mut plugin = RemoteInputPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         let packet = Packet::new(
             "cconnect.mousepad.request",
@@ -535,7 +553,10 @@ mod tests {
     async fn test_handle_special_key() {
         let mut plugin = RemoteInputPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         let packet = Packet::new(
             "cconnect.mousepad.request",
@@ -553,7 +574,10 @@ mod tests {
     async fn test_scroll_event() {
         let mut plugin = RemoteInputPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         let packet = Packet::new(
             "cconnect.mousepad.request",
@@ -573,7 +597,10 @@ mod tests {
     async fn test_modifiers() {
         let mut plugin = RemoteInputPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
 
         let packet = Packet::new(
             "cconnect.mousepad.request",
@@ -610,7 +637,10 @@ mod tests {
         let mut plugin = RemoteInputPlugin::new();
         let device = create_test_device();
 
-        assert!(plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.is_ok());
+        assert!(plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .is_ok());
         assert!(plugin.start().await.is_ok());
         assert!(plugin.stop().await.is_ok());
     }

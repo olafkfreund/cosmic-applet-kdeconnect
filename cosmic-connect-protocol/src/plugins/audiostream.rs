@@ -500,7 +500,11 @@ impl Plugin for AudioStreamPlugin {
         vec![OUTGOING_CAPABILITY.to_string()]
     }
 
-    async fn init(&mut self, device: &Device, _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>) -> Result<()> {
+    async fn init(
+        &mut self,
+        device: &Device,
+        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+    ) -> Result<()> {
         info!(
             "Initializing AudioStream plugin for device {}",
             device.name()
@@ -748,7 +752,10 @@ mod tests {
         let factory = AudioStreamPluginFactory;
         let mut plugin = factory.create();
 
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         let config = StreamConfig::default();
@@ -765,7 +772,10 @@ mod tests {
         let factory = AudioStreamPluginFactory;
         let mut plugin = factory.create();
 
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         // Start a stream first

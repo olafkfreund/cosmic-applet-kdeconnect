@@ -16,7 +16,7 @@
 use super::events::DiscoveryEvent;
 use crate::transport::CCONNECT_SERVICE_UUID;
 use crate::{DeviceInfo, DeviceType, ProtocolError, Result};
-use bluer::{Address, Adapter, Session};
+use bluer::{Adapter, Address, Session};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -241,7 +241,10 @@ impl BluetoothDiscoveryService {
         last_seen: &Arc<RwLock<HashMap<String, u64>>>,
         device_cache: &Arc<RwLock<HashMap<String, DeviceInfo>>>,
     ) -> Result<()> {
-        debug!("Scanning for Bluetooth devices (paired_only={})", paired_only);
+        debug!(
+            "Scanning for Bluetooth devices (paired_only={})",
+            paired_only
+        );
 
         // Get all device addresses known to the adapter
         let device_addresses = adapter
@@ -331,10 +334,7 @@ impl BluetoothDiscoveryService {
         };
 
         if !has_cconnect_service {
-            debug!(
-                "Device {} doesn't have CConnect service UUID",
-                bt_address
-            );
+            debug!("Device {} doesn't have CConnect service UUID", bt_address);
             // Still emit the device - user might want to pair/connect manually
         }
 
@@ -402,7 +402,10 @@ impl BluetoothDiscoveryService {
 
                 for bt_address in timed_out {
                     if let Some(device_info) = device_cache_map.remove(&bt_address) {
-                        info!("Bluetooth device timed out: {} ({})", device_info.device_name, bt_address);
+                        info!(
+                            "Bluetooth device timed out: {} ({})",
+                            device_info.device_name, bt_address
+                        );
                         last_seen_map.remove(&bt_address);
                         let _ = event_tx.send(DiscoveryEvent::DeviceTimeout {
                             device_id: device_info.device_id,
@@ -467,16 +470,16 @@ fn device_type_from_class(class: u32) -> DeviceType {
     let major_class = (class >> 8) & 0x1F;
 
     match major_class {
-        0x01 => DeviceType::Desktop,   // Computer
-        0x02 => DeviceType::Phone,     // Phone
-        0x03 => DeviceType::Desktop,   // LAN/Network Access Point
-        0x04 => DeviceType::Desktop,   // Audio/Video
-        0x05 => DeviceType::Desktop,   // Peripheral
-        0x06 => DeviceType::Desktop,   // Imaging
-        0x07 => DeviceType::Desktop,   // Wearable
-        0x08 => DeviceType::Desktop,   // Toy
-        0x09 => DeviceType::Desktop,   // Health
-        _ => DeviceType::Phone,        // Unknown - assume phone
+        0x01 => DeviceType::Desktop, // Computer
+        0x02 => DeviceType::Phone,   // Phone
+        0x03 => DeviceType::Desktop, // LAN/Network Access Point
+        0x04 => DeviceType::Desktop, // Audio/Video
+        0x05 => DeviceType::Desktop, // Peripheral
+        0x06 => DeviceType::Desktop, // Imaging
+        0x07 => DeviceType::Desktop, // Wearable
+        0x08 => DeviceType::Desktop, // Toy
+        0x09 => DeviceType::Desktop, // Health
+        _ => DeviceType::Phone,      // Unknown - assume phone
     }
 }
 

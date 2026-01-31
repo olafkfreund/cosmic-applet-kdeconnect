@@ -110,10 +110,7 @@ impl BluetoothConnectionManager {
                     loop {
                         match profile_service.accept().await {
                             Ok((connection, remote_addr)) => {
-                                info!(
-                                    "Accepted Bluetooth connection from {} via SDP",
-                                    remote_addr
-                                );
+                                info!("Accepted Bluetooth connection from {} via SDP", remote_addr);
 
                                 let bt_address = remote_addr.to_string();
                                 let temp_device_id = format!("bt_{}", bt_address.replace(':', "_"));
@@ -144,7 +141,10 @@ impl BluetoothConnectionManager {
                 return Ok(());
             }
             Err(e) => {
-                warn!("Failed to register SDP profile: {}, falling back to raw listener", e);
+                warn!(
+                    "Failed to register SDP profile: {}, falling back to raw listener",
+                    e
+                );
             }
         }
 
@@ -195,10 +195,7 @@ impl BluetoothConnectionManager {
             loop {
                 match listener.accept().await {
                     Ok((connection, remote_addr)) => {
-                        info!(
-                            "Accepted Bluetooth connection from {}",
-                            remote_addr
-                        );
+                        info!("Accepted Bluetooth connection from {}", remote_addr);
 
                         let bt_address = remote_addr.to_string();
                         let temp_device_id = format!("bt_{}", bt_address.replace(':', "_"));

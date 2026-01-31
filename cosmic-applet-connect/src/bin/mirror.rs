@@ -55,7 +55,10 @@ impl<Message> canvas::Program<Message, cosmic::Theme, cosmic::Renderer> for Over
 
         // Calculate scale factors if we know video dimensions
         let (scale_x, scale_y) = if let Some((video_w, video_h)) = self.video_size {
-            (bounds.width / video_w as f32, bounds.height / video_h as f32)
+            (
+                bounds.width / video_w as f32,
+                bounds.height / video_h as f32,
+            )
         } else {
             (1.0, 1.0)
         };
@@ -78,7 +81,9 @@ impl<Message> canvas::Program<Message, cosmic::Theme, cosmic::Renderer> for Over
                     );
                     frame.stroke(
                         &path,
-                        canvas::Stroke::default().with_width(stroke_width).with_color(color),
+                        canvas::Stroke::default()
+                            .with_width(stroke_width)
+                            .with_color(color),
                     );
                 }
                 "rect" => {
@@ -88,7 +93,9 @@ impl<Message> canvas::Program<Message, cosmic::Theme, cosmic::Renderer> for Over
                     );
                     frame.stroke(
                         &rect,
-                        canvas::Stroke::default().with_width(stroke_width).with_color(color),
+                        canvas::Stroke::default()
+                            .with_width(stroke_width)
+                            .with_color(color),
                     );
                 }
                 "circle" => {
@@ -97,7 +104,9 @@ impl<Message> canvas::Program<Message, cosmic::Theme, cosmic::Renderer> for Over
                     let circle = canvas::Path::circle(center, radius);
                     frame.stroke(
                         &circle,
-                        canvas::Stroke::default().with_width(stroke_width).with_color(color),
+                        canvas::Stroke::default()
+                            .with_width(stroke_width)
+                            .with_color(color),
                     );
                 }
                 _ => {}
@@ -113,20 +122,18 @@ impl<Message> canvas::Program<Message, cosmic::Theme, cosmic::Renderer> for Over
             let cursor_color = Color::from_rgba(1.0, 0.5, 0.0, 0.9); // Orange
 
             // Outer circle
-            let outer_circle = canvas::Path::circle(
-                cosmic::iced::Point::new(cursor_x, cursor_y),
-                8.0,
-            );
+            let outer_circle =
+                canvas::Path::circle(cosmic::iced::Point::new(cursor_x, cursor_y), 8.0);
             frame.stroke(
                 &outer_circle,
-                canvas::Stroke::default().with_width(2.0).with_color(cursor_color),
+                canvas::Stroke::default()
+                    .with_width(2.0)
+                    .with_color(cursor_color),
             );
 
             // Inner dot
-            let inner_circle = canvas::Path::circle(
-                cosmic::iced::Point::new(cursor_x, cursor_y),
-                3.0,
-            );
+            let inner_circle =
+                canvas::Path::circle(cosmic::iced::Point::new(cursor_x, cursor_y), 3.0);
             frame.fill(&inner_circle, cursor_color);
         }
 
@@ -168,7 +175,11 @@ enum Message {
     Connected,
     Loop(Box<Message>),
     DbusConnected(DbusClient),
-    CursorUpdate { x: i32, y: i32, visible: bool },
+    CursorUpdate {
+        x: i32,
+        y: i32,
+        visible: bool,
+    },
     AnnotationReceived(Annotation),
     #[allow(dead_code)]
     ClearAnnotations,
@@ -190,7 +201,10 @@ impl cosmic::Application for MirrorApp {
 
     fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Message>) {
         let args: Vec<String> = env::args().collect();
-        let device_id = args.get(1).cloned().unwrap_or_else(|| "unknown".to_string());
+        let device_id = args
+            .get(1)
+            .cloned()
+            .unwrap_or_else(|| "unknown".to_string());
 
         let (tx, rx) = mpsc::channel(100); // Increased buffer for cursor updates
         let receiver_rx = Arc::new(Mutex::new(rx));

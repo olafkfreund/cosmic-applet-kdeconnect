@@ -765,7 +765,11 @@ impl Plugin for MacroPlugin {
         ]
     }
 
-    async fn init(&mut self, device: &Device, _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>) -> Result<()> {
+    async fn init(
+        &mut self,
+        device: &Device,
+        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+    ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
         info!("Macro plugin initialized for device {}", device.name());
         Ok(())
@@ -963,7 +967,10 @@ mod tests {
         let mut plugin = MacroPlugin::new();
         let device = create_test_device();
 
-        assert!(plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.is_ok());
+        assert!(plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .is_ok());
         assert!(plugin.start().await.is_ok());
         assert!(plugin.enabled);
         assert!(plugin.stop().await.is_ok());

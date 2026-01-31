@@ -227,7 +227,9 @@ impl PayloadServer {
             let addr = format!("0.0.0.0:{}", port);
             if let Ok(std_listener) = std::net::TcpListener::bind(&addr) {
                 // Set non-blocking for tokio compatibility
-                std_listener.set_nonblocking(true).map_err(ProtocolError::Io)?;
+                std_listener
+                    .set_nonblocking(true)
+                    .map_err(ProtocolError::Io)?;
                 // Convert to tokio TcpListener
                 let listener = TcpListener::from_std(std_listener).map_err(ProtocolError::Io)?;
                 info!("Payload server listening on port {} (blocking init)", port);
@@ -417,7 +419,10 @@ impl PayloadClient {
         } else {
             // Fall back to DNS resolution with "host:port" format
             let addr_str = format!("{}:{}", host, port);
-            let addrs: Vec<SocketAddr> = addr_str.to_socket_addrs().map_err(ProtocolError::Io)?.collect();
+            let addrs: Vec<SocketAddr> = addr_str
+                .to_socket_addrs()
+                .map_err(ProtocolError::Io)?
+                .collect();
             if addrs.is_empty() {
                 return Err(ProtocolError::Io(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
@@ -637,7 +642,10 @@ impl TlsPayloadClient {
         } else {
             // Fall back to DNS resolution with "host:port" format
             let addr_str = format!("{}:{}", host, port);
-            let addrs: Vec<SocketAddr> = addr_str.to_socket_addrs().map_err(ProtocolError::Io)?.collect();
+            let addrs: Vec<SocketAddr> = addr_str
+                .to_socket_addrs()
+                .map_err(ProtocolError::Io)?
+                .collect();
             if addrs.is_empty() {
                 return Err(ProtocolError::Io(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
@@ -684,7 +692,10 @@ impl TlsPayloadClient {
                     ))
                 })?;
 
-        info!("TLS connection established to payload server at {} (as TLS SERVER)", addr);
+        info!(
+            "TLS connection established to payload server at {} (as TLS SERVER)",
+            addr
+        );
 
         Ok(Self {
             stream: tls_stream,
@@ -803,7 +814,10 @@ impl TlsPayloadClient {
 
         // Clean up partial file on error
         if result.is_err() {
-            warn!("TLS transfer failed, cleaning up partial file: {:?}", save_path);
+            warn!(
+                "TLS transfer failed, cleaning up partial file: {:?}",
+                save_path
+            );
             cleanup_partial_file(save_path).await;
         }
 
@@ -934,28 +948,32 @@ impl TlsPayloadServer {
         let connector = TlsConnector::from(self.tls_config.client_config());
 
         // Use a dummy server name since we're using TOFU
-        let server_name = rustls::pki_types::ServerName::try_from("kdeconnect")
-            .map_err(|e| ProtocolError::Io(std::io::Error::new(
+        let server_name = rustls::pki_types::ServerName::try_from("kdeconnect").map_err(|e| {
+            ProtocolError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 format!("Invalid server name: {}", e),
-            )))?;
+            ))
+        })?;
 
         // Perform TLS handshake as CLIENT (inverted role!)
-        let mut tls_stream = timeout(CONNECTION_TIMEOUT, connector.connect(server_name, tcp_stream))
-            .await
-            .map_err(|_| {
-                ProtocolError::Io(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "TLS handshake timeout",
-                ))
-            })?
-            .map_err(|e| {
-                error!("TLS handshake failed for payload transfer: {}", e);
-                ProtocolError::Io(std::io::Error::new(
-                    std::io::ErrorKind::ConnectionRefused,
-                    format!("TLS handshake failed: {}", e),
-                ))
-            })?;
+        let mut tls_stream = timeout(
+            CONNECTION_TIMEOUT,
+            connector.connect(server_name, tcp_stream),
+        )
+        .await
+        .map_err(|_| {
+            ProtocolError::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "TLS handshake timeout",
+            ))
+        })?
+        .map_err(|e| {
+            error!("TLS handshake failed for payload transfer: {}", e);
+            ProtocolError::Io(std::io::Error::new(
+                std::io::ErrorKind::ConnectionRefused,
+                format!("TLS handshake failed: {}", e),
+            ))
+        })?;
 
         info!(
             "TLS connection established with {} for file transfer (as TLS CLIENT)",

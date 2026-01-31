@@ -1451,7 +1451,11 @@ impl Plugin for MprisPlugin {
         ]
     }
 
-    async fn init(&mut self, device: &Device, packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>) -> Result<()> {
+    async fn init(
+        &mut self,
+        device: &Device,
+        packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+    ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
         self.packet_sender = Some(packet_sender);
         info!("MPRIS plugin initialized for device {}", device.name());
@@ -1471,7 +1475,11 @@ impl Plugin for MprisPlugin {
         // Discover initial players
         match self.backend.discover_players().await {
             Ok(players) => {
-                info!("Discovered {} local MPRIS players: {:?}", players.len(), players);
+                info!(
+                    "Discovered {} local MPRIS players: {:?}",
+                    players.len(),
+                    players
+                );
             }
             Err(e) => {
                 warn!("Failed to discover MPRIS players: {}", e);
@@ -1497,7 +1505,9 @@ impl Plugin for MprisPlugin {
 
         if packet.is_type("cconnect.mpris") || packet.is_type("kdeconnect.mpris") {
             self.handle_mpris_status(packet, device).await;
-        } else if packet.is_type("cconnect.mpris.request") || packet.is_type("kdeconnect.mpris.request") {
+        } else if packet.is_type("cconnect.mpris.request")
+            || packet.is_type("kdeconnect.mpris.request")
+        {
             self.handle_mpris_request(packet, device).await?;
         }
         Ok(())
@@ -1601,7 +1611,10 @@ mod tests {
         let mut plugin = MprisPlugin::new();
         let device = create_test_device();
 
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         assert!(plugin.device_id.is_some());
 
         plugin.start().await.unwrap();
@@ -1760,7 +1773,10 @@ mod tests {
     async fn test_handle_player_list() {
         let mut plugin = MprisPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         let mut device = create_test_device();
@@ -1780,7 +1796,10 @@ mod tests {
     async fn test_handle_player_status() {
         let mut plugin = MprisPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         let mut device = create_test_device();
@@ -1864,7 +1883,10 @@ mod tests {
     async fn test_handle_control_request() {
         let mut plugin = MprisPlugin::new();
         let device = create_test_device();
-        plugin.init(&device, tokio::sync::mpsc::channel(100).0).await.unwrap();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
         plugin.start().await.unwrap();
 
         let mut device = create_test_device();
