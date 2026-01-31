@@ -1698,6 +1698,16 @@ impl Daemon {
                     drop(plug_manager);
                     drop(dev_manager);
 
+                    // Check device notification preference
+                    let notification_pref = {
+                        let config_registry = device_config_registry.read().await;
+                        if let Some(config) = config_registry.get(&device_id) {
+                            config.get_notification_preference()
+                        } else {
+                            device_config::NotificationPreference::All
+                        }
+                    };
+
                     // Send COSMIC notifications for specific packet types
                     if let Some(notifier) = &cosmic_notifier {
                         match packet.packet_type.as_str() {
@@ -1765,7 +1775,21 @@ impl Daemon {
                                             .and_then(|v| v.as_bool())
                                             .unwrap_or(false);
 
-                                        if is_messaging {
+                                        // Apply notification filtering based on preference
+                                        let should_show = match notification_pref {
+                                            device_config::NotificationPreference::All => true,
+                                            device_config::NotificationPreference::Important => {
+                                                // Important includes messaging apps, calls, alarms
+                                                is_messaging
+                                                    || app_name.to_lowercase().contains("phone")
+                                                    || app_name.to_lowercase().contains("call")
+                                                    || app_name.to_lowercase().contains("alarm")
+                                                    || app_name.to_lowercase().contains("clock")
+                                            }
+                                            device_config::NotificationPreference::None => false,
+                                        };
+
+                                        if should_show && is_messaging {
                                             let web_url =
                                                 packet.body.get("webUrl").and_then(|v| v.as_str());
 
@@ -1804,7 +1828,7 @@ impl Daemon {
                                                     );
                                                 }
                                             }
-                                        } else {
+                                        } else if should_show {
                                             if let Err(e) = notifier
                                                 .notify_from_device(
                                                     &device_name,
@@ -1816,6 +1840,11 @@ impl Daemon {
                                             {
                                                 warn!("Failed to send device notification: {}", e);
                                             }
+                                        } else {
+                                            debug!(
+                                                "Notification from {} filtered based on preference {:?}",
+                                                device_name, notification_pref
+                                            );
                                         }
                                     }
                                 }

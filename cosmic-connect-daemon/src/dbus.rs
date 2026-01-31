@@ -1428,6 +1428,51 @@ impl CConnectInterface {
         Ok(())
     }
 
+    /// Set notification preference for a device
+    ///
+    /// # Arguments
+    /// * `device_id` - The device ID
+    /// * `preference` - The notification preference ("all", "important", or "none")
+    async fn set_device_notification_preference(
+        &self,
+        device_id: String,
+        preference: String,
+    ) -> Result<(), zbus::fdo::Error> {
+        info!(
+            "DBus: SetDeviceNotificationPreference called for {}: {}",
+            device_id, preference
+        );
+
+        // Parse the preference string
+        let pref = match preference.to_lowercase().as_str() {
+            "all" => crate::device_config::NotificationPreference::All,
+            "important" => crate::device_config::NotificationPreference::Important,
+            "none" => crate::device_config::NotificationPreference::None,
+            _ => {
+                return Err(zbus::fdo::Error::Failed(format!(
+                    "Invalid notification preference: {}. Must be 'all', 'important', or 'none'",
+                    preference
+                )));
+            }
+        };
+
+        let mut registry = self.device_config_registry.write().await;
+        let config = registry.get_or_create(&device_id);
+
+        config.set_notification_preference(pref);
+
+        registry.save().map_err(|e| {
+            zbus::fdo::Error::Failed(format!("Failed to save device config: {}", e))
+        })?;
+
+        info!(
+            "DBus: Notification preference for device {} set to {:?}",
+            device_id, pref
+        );
+
+        Ok(())
+    }
+
     /// Set plugin enabled state for a device
     ///
     /// # Arguments

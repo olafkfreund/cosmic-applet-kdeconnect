@@ -10,6 +10,24 @@ use std::fs;
 use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
+/// Notification preference for a device
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationPreference {
+    /// Show all notifications from this device
+    All,
+    /// Show only important notifications (messaging apps, calls, etc.)
+    Important,
+    /// Don't show any notifications from this device
+    None,
+}
+
+impl Default for NotificationPreference {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
 /// Per-device configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceConfig {
@@ -33,6 +51,10 @@ pub struct DeviceConfig {
     /// Show notifications for this device
     #[serde(default = "default_true")]
     pub show_notifications: bool,
+
+    /// Notification preference for this device
+    #[serde(default)]
+    pub notification_preference: NotificationPreference,
 
     /// MAC address for Wake-on-LAN
     #[serde(default)]
@@ -145,6 +167,7 @@ impl DeviceConfig {
             auto_accept_pairing: false,
             auto_connect: true,
             show_notifications: true,
+            notification_preference: NotificationPreference::default(),
             mac_address: None,
             remotedesktop_settings: None,
         }
@@ -289,6 +312,16 @@ impl DeviceConfig {
     #[allow(dead_code)]
     pub fn clear_mac_address(&mut self) {
         self.mac_address = None;
+    }
+
+    /// Get notification preference for this device
+    pub fn get_notification_preference(&self) -> NotificationPreference {
+        self.notification_preference
+    }
+
+    /// Set notification preference for this device
+    pub fn set_notification_preference(&mut self, preference: NotificationPreference) {
+        self.notification_preference = preference;
     }
 }
 

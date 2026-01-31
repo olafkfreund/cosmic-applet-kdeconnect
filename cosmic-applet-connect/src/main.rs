@@ -1,5 +1,6 @@
 mod dbus_client;
 mod onboarding_config;
+mod pinned_devices_config;
 
 use std::collections::HashMap;
 
@@ -246,6 +247,9 @@ struct TransferState {
     current: u64,
     total: u64,
     direction: String,
+    started_at: std::time::Instant,
+    last_update: std::time::Instant,
+    last_bytes: u64,
 }
 
 /// A recently received file for history tracking
@@ -332,6 +336,8 @@ struct CConnectApplet {
     notification: Option<AppNotification>,
     // Loading state
     pending_operations: std::collections::HashSet<(String, OperationType)>,
+    // Help dialog state
+    show_keyboard_shortcuts_help: bool,
     // Animation state
     notification_progress: f32,
     // Connection status to daemon
@@ -347,6 +353,8 @@ struct CConnectApplet {
     context_menu_mpris: bool,            // whether MPRIS context menu is open
     // Screen share state
     active_screen_share: Option<ActiveScreenShare>, // Currently active screen share session
+    // Pinned devices config
+    pinned_devices_config: pinned_devices_config::PinnedDevicesConfig,
     // Camera state (TODO: uncomment when camera module is implemented)
     // camera_settings_device: Option<String>, // device_id showing Camera settings
     // camera_capabilities: HashMap<String, CameraCapability>, // device_id -> capabilities
@@ -485,6 +493,7 @@ enum Message {
     SetDevicePluginEnabled(String, String, bool),          // device_id, plugin, enabled
     ClearDevicePluginOverride(String, String),             // device_id, plugin
     ResetAllPluginOverrides(String),                       // device_id
+    SetDeviceNotificationPreference(String, dbus_client::NotificationPreference), // device_id, preference
     DeviceConfigLoaded(String, dbus_client::DeviceConfig), // device_id, config
     // RemoteDesktop settings
     ShowRemoteDesktopSettings(String), // device_id
@@ -514,6 +523,10 @@ enum Message {
     OperationSucceeded(String, OperationType, String),
     ClearNotification,
     ShowNotification(String, NotificationType, Option<(String, Box<Message>)>),
+    // Help dialog
+    ToggleKeyboardShortcutsHelp,
+    // Pinned devices
+    ToggleDevicePin(String), // device_id
     // Daemon status
     DaemonConnected,
     DaemonDisconnected,
@@ -863,6 +876,15 @@ impl cosmic::Application for CConnectApplet {
             }
         };
 
+        // Load pinned devices config
+        let pinned_devices_config = match pinned_devices_config::PinnedDevicesConfig::load() {
+            Ok(config) => config,
+            Err(e) => {
+                tracing::warn!("Failed to load pinned devices config: {}, using default", e);
+                pinned_devices_config::PinnedDevicesConfig::default()
+            }
+        };
+
         let app = Self {
             core,
             popup: None,
@@ -902,6 +924,7 @@ impl cosmic::Application for CConnectApplet {
             notification: None,
             pending_operations: std::collections::HashSet::new(),
             notification_progress: 0.0,
+            show_keyboard_shortcuts_help: false,
             daemon_connected: true,
             focus_target: FocusTarget::None,
             drag_hover_device: None,
@@ -910,6 +933,7 @@ impl cosmic::Application for CConnectApplet {
             context_menu_transfer: None,
             context_menu_mpris: false,
             active_screen_share: None,
+            pinned_devices_config,
             // Camera (TODO: uncomment when camera module is implemented)
             // camera_settings_device: None,
             // camera_capabilities: HashMap::new(),
@@ -1417,6 +1441,39 @@ impl cosmic::Application for CConnectApplet {
                     },
                 ))
             }
+            Message::SetDeviceNotificationPreference(device_id, preference) => {
+                tracing::info!(
+                    "Setting notification preference to {:?} for device {}",
+                    preference,
+                    device_id
+                );
+                let device_id_for_async = device_id.clone();
+                let device_id_for_msg = std::sync::Arc::new(device_id.clone());
+                device_operation_task(device_id, "set notification preference", move |client, id| {
+                    async move {
+                        client
+                            .set_device_notification_preference(&id, preference)
+                            .await
+                    }
+                })
+                .chain(Task::perform(
+                    async move {
+                        match DbusClient::connect().await {
+                            Ok((client, _)) => client.get_device_config(&device_id_for_async).await,
+                            Err(e) => Err(e),
+                        }
+                    },
+                    move |result| {
+                        let device_id = (*device_id_for_msg).clone();
+                        match result {
+                            Ok(config) => {
+                                cosmic::Action::App(Message::DeviceConfigLoaded(device_id, config))
+                            }
+                            Err(_) => cosmic::Action::App(Message::RefreshDevices),
+                        }
+                    },
+                ))
+            }
             Message::ResetAllPluginOverrides(device_id) => {
                 tracing::info!("Resetting all plugin overrides for device {}", device_id);
                 let device_id_for_async = device_id.clone();
@@ -1676,6 +1733,21 @@ impl cosmic::Application for CConnectApplet {
             }
             Message::ClearNotification => {
                 self.notification = None;
+                Task::none()
+            }
+            Message::ToggleKeyboardShortcutsHelp => {
+                self.show_keyboard_shortcuts_help = !self.show_keyboard_shortcuts_help;
+                Task::none()
+            }
+            Message::ToggleDevicePin(device_id) => {
+                // Toggle pin state
+                self.pinned_devices_config.toggle_pin(device_id.clone());
+
+                // Save config
+                if let Err(e) = self.pinned_devices_config.save() {
+                    tracing::error!("Failed to save pinned devices config: {}", e);
+                }
+
                 Task::none()
             }
             Message::DaemonConnected => {
@@ -1977,16 +2049,23 @@ impl cosmic::Application for CConnectApplet {
             }
             // File Transfer events
             Message::TransferProgress(tid, device_id, filename, cur, tot, dir) => {
-                self.active_transfers.insert(
-                    tid,
-                    TransferState {
-                        device_id,
-                        filename,
-                        current: cur,
-                        total: tot,
-                        direction: dir,
-                    },
-                );
+                let now = std::time::Instant::now();
+                let entry = self.active_transfers.entry(tid.clone());
+                entry.and_modify(|state| {
+                    state.last_bytes = state.current;
+                    state.current = cur;
+                    state.total = tot;
+                    state.last_update = now;
+                }).or_insert_with(|| TransferState {
+                    device_id,
+                    filename,
+                    current: cur,
+                    total: tot,
+                    direction: dir,
+                    started_at: now,
+                    last_update: now,
+                    last_bytes: 0,
+                });
                 Task::none()
             }
             Message::TransferComplete(tid, device_id, filename, success, _error) => {
@@ -2409,6 +2488,90 @@ impl CConnectApplet {
         }
     }
 
+    /// Maps file extension to appropriate icon name
+    fn file_type_icon(filename: &str) -> &'static str {
+        let extension = std::path::Path::new(filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        match extension.as_str() {
+            // Images
+            "jpg" | "jpeg" | "png" | "gif" | "bmp" | "svg" | "webp" | "ico" => {
+                "image-x-generic-symbolic"
+            }
+            // Documents
+            "pdf" | "doc" | "docx" | "odt" | "txt" | "rtf" => "x-office-document-symbolic",
+            // Spreadsheets
+            "xls" | "xlsx" | "ods" | "csv" => "x-office-spreadsheet-symbolic",
+            // Presentations
+            "ppt" | "pptx" | "odp" => "x-office-presentation-symbolic",
+            // Audio
+            "mp3" | "wav" | "ogg" | "flac" | "m4a" | "aac" | "wma" => "audio-x-generic-symbolic",
+            // Video
+            "mp4" | "avi" | "mkv" | "mov" | "wmv" | "flv" | "webm" => "video-x-generic-symbolic",
+            // Archives
+            "zip" | "tar" | "gz" | "bz2" | "7z" | "rar" | "xz" => "package-x-generic-symbolic",
+            // Code
+            "rs" | "py" | "js" | "ts" | "java" | "c" | "cpp" | "h" | "hpp" => {
+                "text-x-script-symbolic"
+            }
+            // Default
+            _ => "text-x-generic-symbolic",
+        }
+    }
+
+    /// Formats bytes into human-readable size (KB, MB, GB)
+    fn format_file_size(bytes: u64) -> String {
+        const KB: u64 = 1024;
+        const MB: u64 = KB * 1024;
+        const GB: u64 = MB * 1024;
+
+        if bytes >= GB {
+            format!("{:.2} GB", bytes as f64 / GB as f64)
+        } else if bytes >= MB {
+            format!("{:.2} MB", bytes as f64 / MB as f64)
+        } else if bytes >= KB {
+            format!("{:.2} KB", bytes as f64 / KB as f64)
+        } else {
+            format!("{} B", bytes)
+        }
+    }
+
+    /// Calculates estimated time remaining for a transfer
+    fn estimate_time_remaining(state: &TransferState) -> Option<String> {
+        if state.total == 0 || state.current >= state.total {
+            return None;
+        }
+
+        let elapsed = state.last_update.duration_since(state.started_at);
+        if elapsed.as_secs() < 1 {
+            return Some("Calculating...".to_string());
+        }
+
+        let bytes_transferred = state.current;
+        let bytes_remaining = state.total.saturating_sub(state.current);
+        
+        // Calculate speed based on total elapsed time
+        let speed = bytes_transferred as f64 / elapsed.as_secs_f64();
+        
+        if speed < 1.0 {
+            return Some("Calculating...".to_string());
+        }
+
+        let seconds_remaining = (bytes_remaining as f64 / speed) as u64;
+
+        match seconds_remaining {
+            0 => Some("Almost done".to_string()),
+            1..=59 => Some(format!("{}s left", seconds_remaining)),
+            60..=3599 => Some(format!("{}m {}s left", seconds_remaining / 60, seconds_remaining % 60)),
+            3600..=86399 => Some(format!("{}h {}m left", seconds_remaining / 3600, (seconds_remaining % 3600) / 60)),
+            _ => Some(format!("{}d left", seconds_remaining / 86400)),
+        }
+    }
+
+
     /// Records a received file in the history for display in the transfer queue view.
     fn record_received_file(&mut self, device_id: String, filename: String, success: bool) {
         let device_name = self
@@ -2514,23 +2677,30 @@ impl CConnectApplet {
                     .class(cosmic::theme::Button::Transparent)
                     .on_press(menu_message);
 
+                // File metadata
+                let file_icon = Self::file_type_icon(&state.filename);
+                let file_size = Self::format_file_size(state.total);
+                let bytes_transferred = Self::format_file_size(state.current);
+                
+                // Build status text with size and time info
+                let mut status_text = if state.direction == "sending" {
+                    format!("Sending: {} / {}", bytes_transferred, file_size)
+                } else {
+                    format!("Receiving: {} / {}", bytes_transferred, file_size)
+                };
+                
+                // Add time estimate if available
+                if let Some(time_left) = Self::estimate_time_remaining(state) {
+                    status_text.push_str(&format!(" · {}", time_left));
+                }
+
                 let mut transfer_row = row![
-                    icon::from_name(if state.direction == "sending" {
-                        "document-send-symbolic"
-                    } else {
-                        "document-save-symbolic"
-                    })
-                    .size(ICON_M),
+                    icon::from_name(file_icon).size(ICON_M),
                     column![
                         text(&state.filename).size(ICON_14),
                         progress_bar(0.0..=100.0, progress).height(Length::Fixed(6.0)),
                         row![
-                            text(if state.direction == "sending" {
-                                "Sending..."
-                            } else {
-                                "Receiving..."
-                            })
-                            .size(ICON_XS),
+                            text(status_text.clone()).size(ICON_XS),
                             horizontal_space(),
                             text(format!("{:.0}%", progress)).size(ICON_XS),
                         ]
@@ -2836,6 +3006,74 @@ impl CConnectApplet {
             content = column(overlay_content).spacing(SPACE_S).into();
         }
 
+        // Keyboard shortcuts help dialog
+        if self.show_keyboard_shortcuts_help {
+            let shortcuts_content = column![
+                row![
+                    cosmic::widget::text::title3("Keyboard Shortcuts").width(Length::Fill),
+                    cosmic::widget::tooltip(
+                        button::icon(icon::from_name("window-close-symbolic").size(ICON_14))
+                            .on_press(Message::ToggleKeyboardShortcutsHelp)
+                            .padding(SPACE_XXS),
+                        "Close",
+                        cosmic::widget::tooltip::Position::Bottom,
+                    )
+                ]
+                .align_y(cosmic::iced::Alignment::Center),
+                divider::horizontal::default(),
+                column![
+                    row![
+                        cosmic::widget::text::body("Escape").width(Length::FillPortion(2)),
+                        cosmic::widget::text::body("Close dialogs/overlays").width(Length::FillPortion(3)),
+                    ]
+                    .spacing(SPACE_S),
+                    row![
+                        cosmic::widget::text::body("Ctrl+R").width(Length::FillPortion(2)),
+                        cosmic::widget::text::body("Refresh devices").width(Length::FillPortion(3)),
+                    ]
+                    .spacing(SPACE_S),
+                    row![
+                        cosmic::widget::text::body("Ctrl+F").width(Length::FillPortion(2)),
+                        cosmic::widget::text::body("Focus search").width(Length::FillPortion(3)),
+                    ]
+                    .spacing(SPACE_S),
+                    row![
+                        cosmic::widget::text::body("Ctrl+,").width(Length::FillPortion(2)),
+                        cosmic::widget::text::body("Toggle device settings").width(Length::FillPortion(3)),
+                    ]
+                    .spacing(SPACE_S),
+                    divider::horizontal::light(),
+                    cosmic::widget::text::title4("Navigation"),
+                    row![
+                        cosmic::widget::text::body("Tab / Shift+Tab").width(Length::FillPortion(2)),
+                        cosmic::widget::text::body("Next/Previous element").width(Length::FillPortion(3)),
+                    ]
+                    .spacing(SPACE_S),
+                    row![
+                        cosmic::widget::text::body("Arrow Keys").width(Length::FillPortion(2)),
+                        cosmic::widget::text::body("Navigate elements").width(Length::FillPortion(3)),
+                    ]
+                    .spacing(SPACE_S),
+                    row![
+                        cosmic::widget::text::body("Enter / Space").width(Length::FillPortion(2)),
+                        cosmic::widget::text::body("Activate focused element").width(Length::FillPortion(3)),
+                    ]
+                    .spacing(SPACE_S),
+                ]
+                .spacing(SPACE_XS),
+            ]
+            .spacing(SPACE_S);
+
+            content = column![
+                container(shortcuts_content)
+                    .padding(SPACE_M)
+                    .class(cosmic::theme::Container::Card),
+                content
+            ]
+            .spacing(SPACE_S)
+            .into();
+        }
+
         if let Some(notification) = &self.notification {
             let icon_name = match notification.kind {
                 NotificationType::Error => "dialog-error-symbolic",
@@ -2947,9 +3185,13 @@ impl CConnectApplet {
             .into();
         }
 
-        let search_input = cosmic::widget::text_input("Search devices...", &self.search_query)
-            .on_input(Message::SearchChanged)
-            .width(Length::Fill);
+        let search_input = cosmic::widget::tooltip(
+            cosmic::widget::text_input("Search devices...", &self.search_query)
+                .on_input(Message::SearchChanged)
+                .width(Length::Fill),
+            "Search devices (Ctrl+F)",
+            cosmic::widget::tooltip::Position::Bottom,
+        );
 
         let header = row![view_switcher,]
             .spacing(SPACE_S)
@@ -2977,7 +3219,14 @@ impl CConnectApplet {
                     button::icon(icon::from_name("view-refresh-symbolic"))
                         .on_press(Message::RefreshDevices)
                         .padding(SPACE_XXS),
-                    "Refresh devices",
+                    "Refresh devices (Ctrl+R)",
+                    cosmic::widget::tooltip::Position::Bottom,
+                ),
+                cosmic::widget::tooltip(
+                    button::icon(icon::from_name("help-about-symbolic").size(ICON_S))
+                        .on_press(Message::ToggleKeyboardShortcutsHelp)
+                        .padding(SPACE_XXS),
+                    "Keyboard shortcuts",
                     cosmic::widget::tooltip::Position::Bottom,
                 )
             ]
@@ -3045,6 +3294,21 @@ impl CConnectApplet {
                     DeviceCategory::Offline => offline.push(device_state),
                 }
             }
+
+            // Sort each category: pinned devices first
+            let sort_by_pinned = |a: &&DeviceState, b: &&DeviceState| {
+                let a_pinned = self.pinned_devices_config.is_pinned(&a.device.info.device_id);
+                let b_pinned = self.pinned_devices_config.is_pinned(&b.device.info.device_id);
+                match (a_pinned, b_pinned) {
+                    (true, false) => std::cmp::Ordering::Less,
+                    (false, true) => std::cmp::Ordering::Greater,
+                    _ => std::cmp::Ordering::Equal,
+                }
+            };
+
+            connected.sort_by(sort_by_pinned);
+            available.sort_by(sort_by_pinned);
+            offline.sort_by(sort_by_pinned);
 
             let mut device_groups = column![].spacing(SPACE_XXS).width(Length::Fill);
             // Track device index for focus navigation (matches filtered_devices() order)
@@ -3462,6 +3726,22 @@ impl CConnectApplet {
             .spacing(SPACE_XXXS)
             .width(Length::Fill);
 
+        // Pin/favorite button
+        let is_pinned = self.pinned_devices_config.is_pinned(device_id);
+        let star_icon = if is_pinned {
+            "starred-symbolic"
+        } else {
+            "non-starred-symbolic"
+        };
+        let star_button = cosmic::widget::tooltip(
+            button::icon(icon::from_name(star_icon).size(ICON_S))
+                .on_press(Message::ToggleDevicePin(device_id.to_string()))
+                .padding(SPACE_XXS)
+                .class(cosmic::theme::Button::Icon),
+            if is_pinned { "Unpin device" } else { "Pin device" },
+            cosmic::widget::tooltip::Position::Bottom,
+        );
+
         // Build actions
         let actions_row = self.build_device_actions(device, device_id);
 
@@ -3473,6 +3753,7 @@ impl CConnectApplet {
                     .align_x(Horizontal::Center)
                     .padding(Padding::new(SPACE_S)),
                 info_col,
+                star_button,
             ]
             .spacing(SPACE_S)
             .align_y(cosmic::iced::Alignment::Center)
@@ -4020,6 +4301,39 @@ impl CConnectApplet {
             .align_y(cosmic::iced::Alignment::Center)
         };
 
+        // Notification preference section
+        let notification_pref_section = {
+            use dbus_client::NotificationPreference;
+
+            let current_pref = config.notification_preference;
+
+            row![
+                icon::from_name("notification-symbolic").size(ICON_S),
+                cosmic::widget::text::caption("Notifications:").width(Length::Fill),
+                cosmic::widget::dropdown(
+                    &["All", "Important Only", "None"],
+                    Some(match current_pref {
+                        NotificationPreference::All => 0,
+                        NotificationPreference::Important => 1,
+                        NotificationPreference::None => 2,
+                    }),
+                    {
+                        let device_id = device_id.to_string();
+                        move |idx| {
+                            let pref = match idx {
+                                0 => NotificationPreference::All,
+                                1 => NotificationPreference::Important,
+                                _ => NotificationPreference::None,
+                            };
+                            Message::SetDeviceNotificationPreference(device_id.clone(), pref)
+                        }
+                    }
+                )
+            ]
+            .spacing(SPACE_S)
+            .align_y(cosmic::iced::Alignment::Center)
+        };
+
         // Build plugin list
         let mut plugin_list = column![].spacing(SPACE_S);
 
@@ -4156,6 +4470,8 @@ impl CConnectApplet {
             column![
                 header,
                 rename_section,
+                divider::horizontal::default(),
+                notification_pref_section,
                 divider::horizontal::default(),
                 scrollable(plugin_list).height(Length::Fixed(200.0)),
                 divider::horizontal::default(),
@@ -4904,7 +5220,10 @@ impl CConnectApplet {
         if let cosmic::iced::keyboard::Key::Named(cosmic::iced::keyboard::key::Named::Escape) = key
         {
             // Handle Esc key to close overlays/forms one by one
-            if self.notification.is_some() {
+            if self.show_keyboard_shortcuts_help {
+                self.show_keyboard_shortcuts_help = false;
+                return Task::none();
+            } else if self.notification.is_some() {
                 self.notification = None;
                 return Task::none();
             } else if self.add_run_command_device.is_some() {

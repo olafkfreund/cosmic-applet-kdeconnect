@@ -66,6 +66,34 @@ pub struct ScreenShareStats {
     pub avg_fps: u64,
 }
 
+/// Notification preference for a device
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationPreference {
+    /// Show all notifications from this device
+    All,
+    /// Show only important notifications (messaging apps, calls, etc.)
+    Important,
+    /// Don't show any notifications from this device
+    None,
+}
+
+impl Default for NotificationPreference {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+impl std::fmt::Display for NotificationPreference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            NotificationPreference::All => write!(f, "All"),
+            NotificationPreference::Important => write!(f, "Important only"),
+            NotificationPreference::None => write!(f, "None"),
+        }
+    }
+}
+
 /// Device-specific configuration
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DeviceConfig {
@@ -75,6 +103,9 @@ pub struct DeviceConfig {
     pub nickname: Option<String>,
     /// Plugin configuration
     pub plugins: DevicePluginConfig,
+    /// Notification preference for this device
+    #[serde(default)]
+    pub notification_preference: NotificationPreference,
     /// RemoteDesktop plugin-specific settings
     #[serde(default)]
     pub remotedesktop_settings: Option<RemoteDesktopSettings>,
@@ -443,6 +474,13 @@ trait CConnect {
 
     /// Set a custom nickname for a device
     async fn set_device_nickname(&self, device_id: &str, nickname: &str) -> zbus::fdo::Result<()>;
+
+    /// Set notification preference for a device
+    async fn set_device_notification_preference(
+        &self,
+        device_id: &str,
+        preference: &str,
+    ) -> zbus::fdo::Result<()>;
 
     /// Set RemoteDesktop settings for a device
     async fn set_remotedesktop_settings(
@@ -1188,6 +1226,27 @@ impl DbusClient {
             .set_device_nickname(device_id, nickname)
             .await
             .context("Failed to set device nickname")
+    }
+
+    /// Set notification preference for a device
+    pub async fn set_device_notification_preference(
+        &self,
+        device_id: &str,
+        preference: NotificationPreference,
+    ) -> Result<()> {
+        let pref_str = match preference {
+            NotificationPreference::All => "all",
+            NotificationPreference::Important => "important",
+            NotificationPreference::None => "none",
+        };
+        info!(
+            "Setting notification preference for {}: '{}'",
+            device_id, pref_str
+        );
+        self.proxy
+            .set_device_notification_preference(device_id, pref_str)
+            .await
+            .context("Failed to set notification preference")
     }
 
     /// Check if daemon is available
