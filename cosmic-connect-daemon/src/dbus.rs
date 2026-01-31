@@ -1775,6 +1775,35 @@ impl CConnectInterface {
         }
     }
 
+    /// Stop screen share session
+    ///
+    /// Stops an active screen share session for the specified device.
+    ///
+    /// # Arguments
+    /// * `device_id` - The device ID to stop sharing with
+    async fn stop_screen_share(&self, device_id: String) -> Result<(), zbus::fdo::Error> {
+        info!("DBus: StopScreenShare called for {}", device_id);
+
+        let mut plugin_manager = self.plugin_manager.write().await;
+
+        if let Some(plugin) = plugin_manager.get_device_plugin_mut(&device_id, "screenshare") {
+            use cosmic_connect_protocol::plugins::screenshare::ScreenSharePlugin;
+
+            if let Some(screenshare) = plugin.as_any_mut().downcast_mut::<ScreenSharePlugin>() {
+                screenshare.stop_sharing().await.map_err(|e| {
+                    zbus::fdo::Error::Failed(format!("Failed to stop screen share: {}", e))
+                })?;
+
+                info!("Screen share stopped for device {}", device_id);
+                Ok(())
+            } else {
+                Err(zbus::fdo::Error::Failed("Plugin is not ScreenSharePlugin".to_string()))
+            }
+        } else {
+            Err(zbus::fdo::Error::Failed("ScreenShare plugin not found".to_string()))
+        }
+    }
+
     /// Send input event for screen mirroring
     async fn send_mirror_input(&self, device_id: String, x: f32, y: f32, action: String) -> Result<(), zbus::fdo::Error> {
         debug!("DBus: SendMirrorInput called for {} (x: {}, y: {}, action: {})", device_id, x, y, action);

@@ -293,6 +293,15 @@ struct CConnectApplet {
     dragging_files: bool,              // whether files are being dragged over window
     // Context menu state
     context_menu_device: Option<String>, // device_id with open context menu
+    // Screen share state
+    active_screen_share: Option<ActiveScreenShare>, // Currently active screen share session
+}
+
+/// Active screen share session information
+#[derive(Debug, Clone)]
+struct ActiveScreenShare {
+    device_id: String,
+    is_sender: bool, // true if we are sharing, false if receiving
 }
 
 #[derive(Debug, Clone)]
@@ -450,6 +459,10 @@ enum Message {
     // Context menu
     ShowContextMenu(String),  // device_id
     CloseContextMenu,
+    // Screen share control
+    ScreenShareStarted(String, bool), // device_id, is_sender
+    ScreenShareStopped(String),       // device_id
+    StopScreenShare(String),          // device_id - user action to stop sharing
     // File Transfer events
     TransferProgress(
         String,
@@ -734,6 +747,7 @@ impl cosmic::Application for CConnectApplet {
             drag_hover_device: None,
             dragging_files: false,
             context_menu_device: None,
+            active_screen_share: None,
         };
         (app, Task::none())
     }
@@ -1534,6 +1548,45 @@ impl cosmic::Application for CConnectApplet {
                 self.context_menu_device = None;
                 Task::none()
             }
+            // Screen share control
+            Message::ScreenShareStarted(device_id, is_sender) => {
+                tracing::info!(
+                    "Screen share started with {} (sender: {})",
+                    device_id,
+                    is_sender
+                );
+                self.active_screen_share = Some(ActiveScreenShare {
+                    device_id,
+                    is_sender,
+                });
+                Task::none()
+            }
+            Message::ScreenShareStopped(device_id) => {
+                tracing::info!("Screen share stopped with {}", device_id);
+                if matches!(&self.active_screen_share, Some(share) if share.device_id == device_id)
+                {
+                    self.active_screen_share = None;
+                }
+                Task::none()
+            }
+            Message::StopScreenShare(device_id) => {
+                tracing::info!("User requested stop screen share with {}", device_id);
+                let future = async move {
+                    match DbusClient::connect().await {
+                        Ok((client, _)) => {
+                            if let Err(e) = client.stop_screen_share(&device_id).await {
+                                tracing::error!("Failed to stop screen share: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to connect to daemon: {}", e);
+                        }
+                    }
+                };
+                return Task::perform(future, |_| {
+                    cosmic::Action::App(Message::Tick(std::time::Instant::now()))
+                });
+            }
             // File Transfer events
             Message::TransferProgress(tid, device_id, filename, cur, tot, dir) => {
                 self.active_transfers.insert(
@@ -2055,7 +2108,50 @@ impl CConnectApplet {
     }
 
     fn popup_view(&self) -> Element<'_, Message> {
-        let content = self.inner_view();
+        let mut content = self.inner_view();
+
+        // Screen share control overlay - shows when actively sharing/receiving
+        if let Some(screen_share) = &self.active_screen_share {
+            let device_name = self
+                .devices
+                .iter()
+                .find(|d| d.device.id() == screen_share.device_id)
+                .map(|d| d.device.name().to_string())
+                .unwrap_or_else(|| screen_share.device_id.clone());
+
+            let status_text = if screen_share.is_sender {
+                format!("Sharing screen to {}", device_name)
+            } else {
+                format!("Receiving screen from {}", device_name)
+            };
+
+            let device_id = screen_share.device_id.clone();
+
+            let control_row = row![
+                icon::from_name("video-display-symbolic").size(ICON_S),
+                column![
+                    text(status_text),
+                    cosmic::widget::text::caption("Screen sharing active"),
+                ]
+                .spacing(SPACE_XXXS),
+                horizontal_space(),
+                button::destructive("Stop")
+                    .on_press(Message::StopScreenShare(device_id))
+                    .padding(SPACE_XXS),
+            ]
+            .spacing(SPACE_S)
+            .align_y(cosmic::iced::Alignment::Center);
+
+            content = column![
+                container(control_row)
+                    .width(Length::Fill)
+                    .padding(SPACE_S)
+                    .class(cosmic::theme::Container::Primary),
+                content,
+            ]
+            .spacing(SPACE_S)
+            .into();
+        }
 
         if let Some(notification) = &self.notification {
             let icon_name = match notification.kind {
@@ -3888,6 +3984,20 @@ impl CConnectApplet {
                         "Accept".into(),
                         Box::new(Message::LaunchScreenMirror(device_id.to_string())),
                     )),
+                )));
+            }
+            dbus_client::DaemonEvent::ScreenShareStarted {
+                device_id,
+                is_sender,
+            } => {
+                return cosmic::task::message(cosmic::Action::App(Message::ScreenShareStarted(
+                    device_id.clone(),
+                    *is_sender,
+                )));
+            }
+            dbus_client::DaemonEvent::ScreenShareStopped { device_id } => {
+                return cosmic::task::message(cosmic::Action::App(Message::ScreenShareStopped(
+                    device_id.clone(),
                 )));
             }
             _ => {}

@@ -319,6 +319,15 @@ pub enum DaemonEvent {
         color: String,
         width: u8,
     },
+    /// Screen share session started
+    ScreenShareStarted {
+        device_id: String,
+        is_sender: bool,
+    },
+    /// Screen share session stopped
+    ScreenShareStopped {
+        device_id: String,
+    },
 }
 
 /// DBus proxy for COSMIC Connect daemon interface
@@ -508,6 +517,9 @@ trait CConnect {
     /// Start screen share
     async fn start_screen_share(&self, device_id: &str, port: u16) -> zbus::fdo::Result<()>;
 
+    /// Stop screen share session
+    async fn stop_screen_share(&self, device_id: &str) -> zbus::fdo::Result<()>;
+
     /// Send screen mirror input
     async fn send_mirror_input(&self, device_id: String, x: f32, y: f32, action: String) -> zbus::fdo::Result<()>;
 
@@ -524,6 +536,14 @@ trait CConnect {
     /// Signal: Screen share requested
     #[zbus(signal)]
     fn screen_share_requested(device_id: &str) -> zbus::fdo::Result<()>;
+
+    /// Signal: Screen share started
+    #[zbus(signal)]
+    fn screen_share_started(device_id: &str, is_sender: bool) -> zbus::fdo::Result<()>;
+
+    /// Signal: Screen share stopped
+    #[zbus(signal)]
+    fn screen_share_stopped(device_id: &str) -> zbus::fdo::Result<()>;
 
     /// Signal: Screen share cursor update
     #[zbus(signal)]
@@ -763,6 +783,31 @@ impl DbusClient {
                         y2: *args.y2(),
                         color: args.color().to_string(),
                         width: *args.width(),
+                    });
+                }
+            }
+        });
+
+        let event_tx = self.event_tx.clone();
+        let mut started_stream = self.proxy.receive_screen_share_started().await?;
+        tokio::spawn(async move {
+            while let Some(signal) = started_stream.next().await {
+                if let Ok(args) = signal.args() {
+                    let _ = event_tx.send(DaemonEvent::ScreenShareStarted {
+                        device_id: args.device_id().to_string(),
+                        is_sender: *args.is_sender(),
+                    });
+                }
+            }
+        });
+
+        let event_tx = self.event_tx.clone();
+        let mut stopped_stream = self.proxy.receive_screen_share_stopped().await?;
+        tokio::spawn(async move {
+            while let Some(signal) = stopped_stream.next().await {
+                if let Ok(args) = signal.args() {
+                    let _ = event_tx.send(DaemonEvent::ScreenShareStopped {
+                        device_id: args.device_id().to_string(),
                     });
                 }
             }
@@ -1142,6 +1187,14 @@ impl DbusClient {
             .start_screen_share(device_id, port)
             .await
             .context("Failed to call start_screen_share")
+    }
+
+    /// Stop screen share session
+    pub async fn stop_screen_share(&self, device_id: &str) -> Result<()> {
+        self.proxy
+            .stop_screen_share(device_id)
+            .await
+            .context("Failed to call stop_screen_share")
     }
 
     /// Send screen mirror input
