@@ -2561,8 +2561,8 @@ impl cosmic::Application for CConnectApplet {
                             );
 
                             popup_settings.positioner.size_limits = Limits::NONE
-                                .min_width(300.0)
-                                .max_width(400.0)
+                                .min_width(380.0)
+                                .max_width(480.0)
                                 .min_height(200.0)
                                 .max_height(600.0);
 
@@ -4658,27 +4658,6 @@ impl CConnectApplet {
             .spacing(SPACE_S)
             .align_y(cosmic::iced::Alignment::Center);
 
-            // Override indicator (Icon + Text for accessibility)
-            if has_override {
-                plugin_row = plugin_row.push(if plugin_enabled {
-                    row![
-                        icon::from_name("emblem-ok-symbolic").size(ICON_XS),
-                        cosmic::widget::text::caption("Override: On")
-                    ]
-                    .spacing(SPACE_XXS)
-                    .align_y(cosmic::iced::Alignment::Center)
-                } else {
-                    row![
-                        icon::from_name("emblem-important-symbolic").size(ICON_XS),
-                        cosmic::widget::text::caption("Override: Off")
-                    ]
-                    .spacing(SPACE_XXS)
-                    .align_y(cosmic::iced::Alignment::Center)
-                });
-            } else {
-                plugin_row = plugin_row.push(cosmic::widget::text::caption(""));
-            }
-
             // Toggle switch (only enabled for supported plugins)
             if is_supported {
                 plugin_row = plugin_row.push(toggler(plugin_enabled).on_toggle({
@@ -4704,24 +4683,19 @@ impl CConnectApplet {
                 ));
             }
 
-            // Reset button (if override exists)
+            // Reset button (only shown if override exists)
             if has_override {
                 plugin_row = plugin_row.push(cosmic::widget::tooltip(
-                    button::icon(icon::from_name("view-refresh-symbolic").size(ICON_XS))
+                    button::icon(icon::from_name("edit-undo-symbolic").size(ICON_XS))
                         .on_press({
                             let device_id = device_id.to_string();
                             let plugin_id = plugin_meta.id.to_string();
                             Message::ClearDevicePluginOverride(device_id, plugin_id)
                         })
                         .padding(SPACE_XXS),
-                    "Reset override",
+                    "Reset to default",
                     cosmic::widget::tooltip::Position::Bottom,
                 ));
-            } else {
-                plugin_row = plugin_row.push(
-                    button::icon(icon::from_name("view-refresh-symbolic").size(ICON_XS))
-                        .padding(SPACE_XXS),
-                );
             }
 
             // Settings button (only for RemoteDesktop and FileSync plugin)
