@@ -82,6 +82,10 @@ mouse-keyboard-input = "0.9"
 # - rfcomm: RFCOMM socket support for serial communication
 bluer = { version = "0.17", features = ["bluetoothd", "rfcomm"] }
 
+# Rich Notification Support
+regex = "1.10"
+open = "5.0"
+
 [profile.dev]
 opt-level = 0
 debug = true

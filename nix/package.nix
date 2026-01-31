@@ -137,17 +137,16 @@ rustPlatform.buildRustPackage rec {
     Restart=on-failure
     RestartSec=5
 
-    # Security hardening (ProtectHome=read-only allows reading but not writing to unspecified home paths)
+    # Security hardening
+    # Note: ProtectHome is NOT used because this is a user service that needs
+    # write access to ~/.config/cosmic and ~/.local/share/cosmic for config files.
+    # ProtectHome=read-only + ReadWritePaths doesn't reliably allow directory creation.
     NoNewPrivileges=true
     ProtectSystem=strict
-    ProtectHome=read-only
     PrivateTmp=true
     ProtectKernelTunables=true
     ProtectControlGroups=true
     RestrictSUIDSGID=true
-
-    # Allow write access to config and data directories
-    ReadWritePaths=%h/.config/cosmic %h/.local/share/cosmic
 
     # Network access required for device discovery and communication
     PrivateNetwork=false

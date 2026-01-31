@@ -122,6 +122,73 @@ use tracing::{debug, info, warn};
 
 use super::{Plugin, PluginFactory};
 
+/// Clickable link within a notification
+///
+/// Represents a hyperlink embedded in notification text or rich content.
+///
+/// ## Example
+///
+/// ```rust
+/// use cosmic_connect_core::plugins::notification::NotificationLink;
+///
+/// let link = NotificationLink {
+///     url: "https://example.com/article".to_string(),
+///     title: Some("Read More".to_string()),
+///     start: 10,
+///     length: 9,
+/// };
+///
+/// assert_eq!(link.url, "https://example.com/article");
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct NotificationLink {
+    /// The URL to open when clicked
+    pub url: String,
+
+    /// Optional display title for the link
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// Starting position in the text (character offset)
+    pub start: usize,
+
+    /// Length of the linked text (character count)
+    pub length: usize,
+}
+
+impl NotificationLink {
+    /// Create a new notification link
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use cosmic_connect_core::plugins::notification::NotificationLink;
+    ///
+    /// let link = NotificationLink::new(
+    ///     "https://example.com",
+    ///     Some("Example"),
+    ///     0,
+    ///     7
+    /// );
+    ///
+    /// assert_eq!(link.url, "https://example.com");
+    /// assert_eq!(link.title, Some("Example".to_string()));
+    /// ```
+    pub fn new(
+        url: impl Into<String>,
+        title: Option<impl Into<String>>,
+        start: usize,
+        length: usize,
+    ) -> Self {
+        Self {
+            url: url.into(),
+            title: title.map(|t| t.into()),
+            start,
+            length,
+        }
+    }
+}
+
 /// Notification data
 ///
 /// Represents a notification from a remote device.
@@ -227,6 +294,22 @@ pub struct Notification {
     /// Base64 encoded sender avatar image
     #[serde(rename = "senderAvatar", skip_serializing_if = "Option::is_none")]
     pub sender_avatar: Option<String>,
+
+    /// Rich HTML formatted body text
+    #[serde(rename = "richBody", skip_serializing_if = "Option::is_none")]
+    pub rich_body: Option<String>,
+
+    /// Base64 encoded notification image
+    #[serde(rename = "imageData", skip_serializing_if = "Option::is_none")]
+    pub image_data: Option<String>,
+
+    /// Clickable links in the notification
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub links: Option<Vec<NotificationLink>>,
+
+    /// Base64 encoded video thumbnail
+    #[serde(rename = "videoThumbnail", skip_serializing_if = "Option::is_none")]
+    pub video_thumbnail: Option<String>,
 }
 
 impl Notification {
@@ -276,6 +359,10 @@ impl Notification {
             group_name: None,
             has_reply_action: false,
             sender_avatar: None,
+            rich_body: None,
+            image_data: None,
+            links: None,
+            video_thumbnail: None,
         }
     }
 
@@ -325,6 +412,91 @@ impl Notification {
             .as_ref()
             .map(|a| !a.is_empty())
             .unwrap_or(false)
+    }
+
+    /// Check if notification has rich HTML content
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use cosmic_connect_core::plugins::notification::Notification;
+    ///
+    /// let mut notif = Notification::new("1", "App", "Title", "Text", true);
+    /// notif.rich_body = Some("<b>Bold</b> text".to_string());
+    /// assert!(notif.has_rich_content());
+    /// ```
+    pub fn has_rich_content(&self) -> bool {
+        self.rich_body.is_some()
+    }
+
+    /// Check if notification has an image
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use cosmic_connect_core::plugins::notification::Notification;
+    ///
+    /// let mut notif = Notification::new("1", "App", "Title", "Text", true);
+    /// notif.image_data = Some("base64encodeddata".to_string());
+    /// assert!(notif.has_image());
+    /// ```
+    pub fn has_image(&self) -> bool {
+        self.image_data.is_some() || self.sender_avatar.is_some()
+    }
+
+    /// Check if notification has clickable links
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use cosmic_connect_core::plugins::notification::{Notification, NotificationLink};
+    ///
+    /// let mut notif = Notification::new("1", "App", "Title", "Text", true);
+    /// notif.links = Some(vec![NotificationLink::new("https://example.com", None::<String>, 0, 10)]);
+    /// assert!(notif.has_links());
+    /// ```
+    pub fn has_links(&self) -> bool {
+        self.links
+            .as_ref()
+            .map(|l| !l.is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Get decoded image data
+    ///
+    /// Decodes base64 image data if present.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use cosmic_connect_core::plugins::notification::Notification;
+    ///
+    /// let mut notif = Notification::new("1", "App", "Title", "Text", true);
+    /// notif.image_data = Some(base64::encode(b"fake image data"));
+    /// assert!(notif.get_image_bytes().is_some());
+    /// ```
+    pub fn get_image_bytes(&self) -> Option<Vec<u8>> {
+        use base64::{Engine as _, engine::general_purpose};
+
+        self.image_data
+            .as_ref()
+            .and_then(|data| general_purpose::STANDARD.decode(data).ok())
+            .or_else(|| {
+                self.sender_avatar
+                    .as_ref()
+                    .and_then(|data| general_purpose::STANDARD.decode(data).ok())
+            })
+    }
+
+    /// Get decoded video thumbnail bytes
+    ///
+    /// Decodes base64 video thumbnail data if present.
+    pub fn get_video_thumbnail_bytes(&self) -> Option<Vec<u8>> {
+        use base64::{Engine as _, engine::general_purpose};
+
+        self.video_thumbnail
+            .as_ref()
+            .and_then(|data| general_purpose::STANDARD.decode(data).ok())
     }
 }
 
@@ -1027,5 +1199,167 @@ mod tests {
         // Round trip
         let deserialized: Notification = serde_json::from_value(json).unwrap();
         assert_eq!(notif, deserialized);
+    }
+
+    #[test]
+    fn test_notification_link_creation() {
+        let link = NotificationLink::new("https://example.com", Some("Example"), 0, 7);
+
+        assert_eq!(link.url, "https://example.com");
+        assert_eq!(link.title, Some("Example".to_string()));
+        assert_eq!(link.start, 0);
+        assert_eq!(link.length, 7);
+    }
+
+    #[test]
+    fn test_notification_link_serialization() {
+        let link = NotificationLink::new("https://example.com", Some("Example"), 10, 5);
+        let json = serde_json::to_value(&link).unwrap();
+
+        assert_eq!(json["url"], "https://example.com");
+        assert_eq!(json["title"], "Example");
+        assert_eq!(json["start"], 10);
+        assert_eq!(json["length"], 5);
+
+        // Round trip
+        let deserialized: NotificationLink = serde_json::from_value(json).unwrap();
+        assert_eq!(link, deserialized);
+    }
+
+    #[test]
+    fn test_rich_notification_creation() {
+        let mut notif = Notification::new("123", "App", "Title", "Text", true);
+        notif.rich_body = Some("<b>Bold</b> and <i>italic</i> text".to_string());
+        notif.image_data = Some(base64::encode(b"fake image data"));
+        notif.links = Some(vec![NotificationLink::new(
+            "https://example.com",
+            Some("Link"),
+            0,
+            4,
+        )]);
+
+        assert!(notif.has_rich_content());
+        assert!(notif.has_image());
+        assert!(notif.has_links());
+    }
+
+    #[test]
+    fn test_rich_notification_serialization() {
+        let mut notif = Notification::new("123", "App", "Title", "Text", true);
+        notif.rich_body = Some("<b>Bold</b> text".to_string());
+        notif.image_data = Some(base64::encode(b"fake image"));
+        notif.links = Some(vec![NotificationLink::new("https://example.com", None::<String>, 0, 10)]);
+        notif.video_thumbnail = Some(base64::encode(b"fake thumbnail"));
+
+        let json = serde_json::to_value(&notif).unwrap();
+
+        assert_eq!(json["richBody"], "<b>Bold</b> text");
+        assert!(json["imageData"].is_string());
+        assert!(json["links"].is_array());
+        assert!(json["videoThumbnail"].is_string());
+
+        // Round trip
+        let deserialized: Notification = serde_json::from_value(json).unwrap();
+        assert_eq!(notif, deserialized);
+    }
+
+    #[test]
+    fn test_notification_image_decoding() {
+        use base64::{Engine as _, engine::general_purpose};
+
+        let mut notif = Notification::new("123", "App", "Title", "Text", true);
+        let image_data = b"fake image data";
+        notif.image_data = Some(general_purpose::STANDARD.encode(image_data));
+
+        let decoded = notif.get_image_bytes().unwrap();
+        assert_eq!(decoded, image_data);
+    }
+
+    #[test]
+    fn test_notification_sender_avatar_fallback() {
+        use base64::{Engine as _, engine::general_purpose};
+
+        let mut notif = Notification::new("123", "App", "Title", "Text", true);
+        let avatar_data = b"avatar data";
+        notif.sender_avatar = Some(general_purpose::STANDARD.encode(avatar_data));
+
+        // Should fall back to sender_avatar if image_data is not present
+        let decoded = notif.get_image_bytes().unwrap();
+        assert_eq!(decoded, avatar_data);
+    }
+
+    #[test]
+    fn test_notification_video_thumbnail_decoding() {
+        use base64::{Engine as _, engine::general_purpose};
+
+        let mut notif = Notification::new("123", "App", "Title", "Text", true);
+        let thumbnail_data = b"thumbnail data";
+        notif.video_thumbnail = Some(general_purpose::STANDARD.encode(thumbnail_data));
+
+        let decoded = notif.get_video_thumbnail_bytes().unwrap();
+        assert_eq!(decoded, thumbnail_data);
+    }
+
+    #[test]
+    fn test_notification_has_rich_content() {
+        let mut notif = Notification::new("1", "App", "Title", "Text", true);
+        assert!(!notif.has_rich_content());
+
+        notif.rich_body = Some("<b>Rich</b>".to_string());
+        assert!(notif.has_rich_content());
+    }
+
+    #[test]
+    fn test_notification_has_image() {
+        let mut notif = Notification::new("1", "App", "Title", "Text", true);
+        assert!(!notif.has_image());
+
+        notif.image_data = Some("base64data".to_string());
+        assert!(notif.has_image());
+
+        notif.image_data = None;
+        notif.sender_avatar = Some("avatar".to_string());
+        assert!(notif.has_image());
+    }
+
+    #[test]
+    fn test_notification_has_links() {
+        let mut notif = Notification::new("1", "App", "Title", "Text", true);
+        assert!(!notif.has_links());
+
+        notif.links = Some(vec![]);
+        assert!(!notif.has_links());
+
+        notif.links = Some(vec![NotificationLink::new("https://example.com", None::<String>, 0, 10)]);
+        assert!(notif.has_links());
+    }
+
+    #[tokio::test]
+    async fn test_handle_rich_notification() {
+        use base64::{Engine as _, engine::general_purpose};
+
+        let mut plugin = NotificationPlugin::new();
+        let device = create_test_device();
+        plugin
+            .init(&device, tokio::sync::mpsc::channel(100).0)
+            .await
+            .unwrap();
+
+        let mut notif = Notification::new("123", "WhatsApp", "New Message", "Check this out!", true);
+        notif.rich_body = Some("<b>Important:</b> Check <a href=\"https://example.com\">this link</a>".to_string());
+        notif.image_data = Some(general_purpose::STANDARD.encode(b"image data"));
+        notif.links = Some(vec![
+            NotificationLink::new("https://example.com", Some("Link"), 20, 4),
+        ]);
+
+        let packet = plugin.create_notification_packet(&notif);
+        let mut device = create_test_device();
+        plugin.handle_packet(&packet, &mut device).await.unwrap();
+
+        let stored = plugin.get_notification("123").unwrap();
+        assert_eq!(stored.rich_body, Some("<b>Important:</b> Check <a href=\"https://example.com\">this link</a>".to_string()));
+        assert!(stored.has_rich_content());
+        assert!(stored.has_image());
+        assert!(stored.has_links());
     }
 }

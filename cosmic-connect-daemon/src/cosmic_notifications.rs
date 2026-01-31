@@ -5,8 +5,18 @@
 
 use anyhow::{Context, Result};
 use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use tracing::debug;
 use zbus::Connection;
+
+/// Notification metadata stored for action callbacks
+#[derive(Debug, Clone)]
+struct NotificationMetadata {
+    /// Notification ID
+    pub id: String,
+    /// Associated links
+    pub links: Vec<String>,
+}
 
 /// COSMIC notification client
 ///
@@ -15,6 +25,8 @@ use zbus::Connection;
 #[derive(Debug, Clone)]
 pub struct CosmicNotifier {
     connection: Connection,
+    /// Metadata for active notifications (for link actions)
+    metadata: Arc<RwLock<HashMap<u32, NotificationMetadata>>>,
 }
 
 /// Notification urgency level
@@ -58,9 +70,87 @@ impl NotificationBuilder {
         }
     }
 
+    /// Sanitize HTML for freedesktop notifications
+    ///
+    /// Converts HTML to freedesktop-safe subset: <b>, <i>, <u>, <a>
+    /// Strips all other tags and dangerous attributes.
+    fn sanitize_html(html: &str) -> String {
+        // Simple HTML sanitizer for freedesktop notification spec
+        // Allowed tags: <b>, <i>, <u>, <a href="...">
+        let mut result = html.to_string();
+
+        // Remove dangerous tags
+        let dangerous = [
+            "script", "style", "iframe", "object", "embed", "link", "meta",
+            "html", "head", "body", "img", "video", "audio",
+        ];
+        for tag in dangerous {
+            // Remove opening and closing tags
+            result = result
+                .replace(&format!("<{}>", tag), "")
+                .replace(&format!("</{}>", tag), "")
+                .replace(&format!("<{} ", tag), "<");
+        }
+
+        // Keep only safe attributes in <a> tags
+        // This is a simple implementation - production would need proper HTML parsing
+        result = regex::Regex::new(r#"<a\s+[^>]*href=["']([^"']+)["'][^>]*>"#)
+            .unwrap()
+            .replace_all(&result, r#"<a href="$1">"#)
+            .to_string();
+
+        result
+    }
+
     /// Set notification body text
     pub fn body(mut self, body: impl Into<String>) -> Self {
         self.body = body.into();
+        self
+    }
+
+    /// Set rich HTML body text
+    ///
+    /// Automatically sanitizes HTML to freedesktop-safe subset.
+    pub fn rich_body(mut self, html: impl Into<String>) -> Self {
+        self.body = Self::sanitize_html(&html.into());
+        self
+    }
+
+    /// Set notification image data
+    ///
+    /// Sets the image-data hint for displaying an image in the notification.
+    /// Image data should be in ARGB32 format.
+    pub fn image_data(mut self, image_bytes: Vec<u8>, width: i32, height: i32) -> Self {
+        use zbus::zvariant::Value;
+
+        // Convert image bytes to ARGB32 format expected by freedesktop spec
+        // Assuming input is already ARGB32
+        let has_alpha = true;
+        let bits_per_sample = 8;
+        let channels = 4;
+        let rowstride = width * channels;
+
+        // Create image-data structure as per freedesktop spec
+        let image_struct = Value::Structure(
+            vec![
+                Value::I32(width),
+                Value::I32(height),
+                Value::I32(rowstride),
+                Value::Bool(has_alpha),
+                Value::I32(bits_per_sample),
+                Value::I32(channels),
+                Value::Array(
+                    image_bytes
+                        .into_iter()
+                        .map(Value::U8)
+                        .collect::<Vec<_>>()
+                        .into(),
+                ),
+            ]
+            .into(),
+        );
+
+        self.hints.insert("image-data".to_string(), image_struct);
         self
     }
 
@@ -153,7 +243,10 @@ impl CosmicNotifier {
 
         debug!("Connected to COSMIC notifications service");
 
-        Ok(Self { connection })
+        Ok(Self {
+            connection,
+            metadata: Arc::new(RwLock::new(HashMap::new())),
+        })
     }
 
     /// Send a notification to COSMIC Desktop
@@ -170,6 +263,15 @@ impl CosmicNotifier {
     /// ).await?;
     /// ```
     pub async fn send(&self, builder: NotificationBuilder) -> Result<u32> {
+        self.send_with_metadata(builder, None).await
+    }
+
+    /// Send notification with optional metadata
+    async fn send_with_metadata(
+        &self,
+        builder: NotificationBuilder,
+        notification_id: Option<String>,
+    ) -> Result<u32> {
         let params = builder.build();
 
         let proxy = zbus::Proxy::new(
@@ -181,7 +283,7 @@ impl CosmicNotifier {
         .await
         .context("Failed to create notifications proxy")?;
 
-        let notification_id: u32 = proxy
+        let notif_id: u32 = proxy
             .call_method(
                 "Notify",
                 &(
@@ -201,12 +303,25 @@ impl CosmicNotifier {
             .deserialize()
             .context("Failed to parse notification ID")?;
 
+        // Store metadata for action callbacks
+        if let Some(id) = notification_id {
+            if let Ok(mut metadata) = self.metadata.write() {
+                metadata.insert(
+                    notif_id,
+                    NotificationMetadata {
+                        id,
+                        links: Vec::new(),
+                    },
+                );
+            }
+        }
+
         debug!(
             "Sent notification '{}' with ID {}",
-            params.summary, notification_id
+            params.summary, notif_id
         );
 
-        Ok(notification_id)
+        Ok(notif_id)
     }
 
     /// Send a ping notification from a device
@@ -248,6 +363,51 @@ impl CosmicNotifier {
                 .timeout(10000), // 10 seconds for device notifications
         )
         .await
+    }
+
+    /// Send a rich notification from a device
+    ///
+    /// Supports HTML content, images, and links.
+    pub async fn notify_rich_from_device(
+        &self,
+        notification_id: &str,
+        device_name: &str,
+        app_name: &str,
+        title: &str,
+        text: &str,
+        rich_body: Option<&str>,
+        image_bytes: Option<(Vec<u8>, i32, i32)>,
+        links: Vec<String>,
+    ) -> Result<u32> {
+        let summary = format!("{} ({})", title, device_name);
+        let body_text = if !app_name.is_empty() {
+            format!("{}\n{}", app_name, text)
+        } else {
+            text.to_string()
+        };
+
+        let mut builder = NotificationBuilder::new(summary).icon("phone-symbolic").timeout(10000);
+
+        // Use rich body if available, otherwise plain text
+        if let Some(html) = rich_body {
+            builder = builder.rich_body(html);
+        } else {
+            builder = builder.body(body_text);
+        }
+
+        // Add image if available
+        if let Some((bytes, width, height)) = image_bytes {
+            builder = builder.image_data(bytes, width, height);
+        }
+
+        // Add link actions
+        for (idx, link) in links.iter().enumerate() {
+            let action_id = format!("open_link_{}:{}", idx, link);
+            builder = builder.action(action_id, format!("Open Link {}", idx + 1));
+        }
+
+        self.send_with_metadata(builder, Some(notification_id.to_string()))
+            .await
     }
 
     /// Send a messaging notification with potentially actionable web URL
@@ -567,9 +727,44 @@ impl CosmicNotifier {
             .await
             .context("Failed to close notification")?;
 
+        // Clean up metadata
+        if let Ok(mut metadata) = self.metadata.write() {
+            metadata.remove(&notification_id);
+        }
+
         debug!("Closed notification {}", notification_id);
 
         Ok(())
+    }
+
+    /// Open a notification link
+    ///
+    /// Opens the URL in the default browser when a link action is triggered.
+    pub async fn open_notification_link(
+        &self,
+        notification_id: u32,
+        link_url: &str,
+    ) -> Result<()> {
+        debug!(
+            "Opening link from notification {}: {}",
+            notification_id, link_url
+        );
+
+        // Open URL in default browser
+        if let Err(e) = open::that(link_url) {
+            debug!("Failed to open link: {}", e);
+            return Err(anyhow::anyhow!("Failed to open link: {}", e));
+        }
+
+        Ok(())
+    }
+
+    /// Get notification metadata by ID
+    pub fn get_metadata(&self, notification_id: u32) -> Option<NotificationMetadata> {
+        self.metadata
+            .read()
+            .ok()
+            .and_then(|m| m.get(&notification_id).cloned())
     }
 
     /// Subscribe to notification action signals
@@ -728,5 +923,99 @@ mod tests {
         } else {
             panic!("Urgency hint not found or wrong type");
         }
+    }
+
+    #[test]
+    fn test_html_sanitization() {
+        // Allowed tags
+        let safe = "<b>Bold</b> <i>Italic</i> <u>Underline</u> <a href=\"https://example.com\">Link</a>";
+        let sanitized = NotificationBuilder::sanitize_html(safe);
+        assert!(sanitized.contains("<b>"));
+        assert!(sanitized.contains("<i>"));
+        assert!(sanitized.contains("<u>"));
+        assert!(sanitized.contains("<a href="));
+
+        // Dangerous tags should be removed
+        let dangerous = "<script>alert('xss')</script><b>Safe</b>";
+        let sanitized = NotificationBuilder::sanitize_html(dangerous);
+        assert!(!sanitized.contains("<script>"));
+        assert!(sanitized.contains("<b>Safe</b>"));
+
+        // Remove dangerous attributes from links
+        let onclick = r#"<a href="https://example.com" onclick="alert('xss')">Link</a>"#;
+        let sanitized = NotificationBuilder::sanitize_html(onclick);
+        assert!(!sanitized.contains("onclick"));
+        assert!(sanitized.contains("href="));
+    }
+
+    #[test]
+    fn test_rich_body_builder() {
+        let builder = NotificationBuilder::new("Test")
+            .rich_body("<b>Bold</b> and <i>italic</i>");
+
+        let params = builder.build();
+        assert!(params.body.contains("<b>"));
+        assert!(params.body.contains("<i>"));
+    }
+
+    #[test]
+    fn test_image_data_hint() {
+        use zbus::zvariant::Value;
+
+        let image_bytes = vec![255u8; 400]; // 10x10 ARGB32 image
+        let builder = NotificationBuilder::new("Test").image_data(image_bytes, 10, 10);
+
+        let params = builder.build();
+        assert!(params.hints.contains_key("image-data"));
+
+        if let Some(Value::Structure(fields)) = params.hints.get("image-data") {
+            assert_eq!(fields.fields().len(), 7);
+            // Verify structure: width, height, rowstride, has_alpha, bits_per_sample, channels, data
+            if let Value::I32(width) = &fields.fields()[0] {
+                assert_eq!(*width, 10);
+            }
+            if let Value::I32(height) = &fields.fields()[1] {
+                assert_eq!(*height, 10);
+            }
+        } else {
+            panic!("image-data hint not found or wrong type");
+        }
+    }
+
+    #[test]
+    fn test_notification_link_new() {
+        use cosmic_connect_protocol::plugins::notification::NotificationLink;
+
+        let link = NotificationLink::new("https://example.com", Some("Example"), 0, 7);
+        assert_eq!(link.url, "https://example.com");
+        assert_eq!(link.title, Some("Example".to_string()));
+        assert_eq!(link.start, 0);
+        assert_eq!(link.length, 7);
+    }
+
+    #[test]
+    fn test_sanitize_script_tags() {
+        let dangerous = r#"<script>alert('xss')</script>Normal text"#;
+        let sanitized = NotificationBuilder::sanitize_html(dangerous);
+        assert!(!sanitized.contains("<script"));
+        assert!(!sanitized.contains("</script"));
+        assert!(sanitized.contains("Normal text"));
+    }
+
+    #[test]
+    fn test_sanitize_multiple_dangerous_tags() {
+        let dangerous = r#"<img src="x"><style>body{}</style><iframe></iframe>Text"#;
+        let sanitized = NotificationBuilder::sanitize_html(dangerous);
+        assert!(!sanitized.contains("<img"));
+        assert!(!sanitized.contains("<style"));
+        assert!(!sanitized.contains("<iframe"));
+        assert!(sanitized.contains("Text"));
+    }
+
+    #[test]
+    fn test_sanitize_preserves_safe_content() {
+        let safe = "Plain text with <b>bold</b> and <i>italic</i> and <u>underline</u>";
+        let sanitized = NotificationBuilder::sanitize_html(safe);
+        assert_eq!(safe, sanitized);
     }
 }

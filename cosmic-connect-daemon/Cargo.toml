@@ -24,6 +24,8 @@ chrono = { workspace = true }
 clap = { workspace = true }
 hostname = "0.4"
 arboard = "3.4"
+regex = { workspace = true }
+open = { workspace = true }
 
 [build-dependencies]
 chrono = { workspace = true }
