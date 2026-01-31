@@ -1247,15 +1247,13 @@ impl cosmic::Application for CConnectApplet {
                 // Send URL to device
                 Task::perform(
                     async move {
-                        let client = match get_dbus_client().await {
-                            Some(client) => client,
-                            None => {
-                                tracing::error!("Failed to get DBus client");
-                                return Err("Failed to connect to daemon".to_string());
-                            }
-                        };
+                        let (client, _) = DbusClient::connect()
+                            .await
+                            .map_err(|e| format!("Failed to connect to daemon: {}", e))?;
 
-                        client.open_on_phone(&url).await
+                        client
+                            .open_on_phone(&url)
+                            .await
                             .map_err(|e| format!("Failed to open URL: {}", e))
                     },
                     |result| {

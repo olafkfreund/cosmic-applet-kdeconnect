@@ -121,36 +121,37 @@ impl NotificationBuilder {
     /// Sets the image-data hint for displaying an image in the notification.
     /// Image data should be in ARGB32 format.
     pub fn image_data(mut self, image_bytes: Vec<u8>, width: i32, height: i32) -> Self {
-        use zbus::zvariant::Value;
+        use zbus::zvariant::{Array, StructureBuilder, Value};
 
         // Convert image bytes to ARGB32 format expected by freedesktop spec
         // Assuming input is already ARGB32
         let has_alpha = true;
-        let bits_per_sample = 8;
-        let channels = 4;
+        let bits_per_sample = 8i32;
+        let channels = 4i32;
         let rowstride = width * channels;
 
-        // Create image-data structure as per freedesktop spec
-        let image_struct = Value::Structure(
-            vec![
-                Value::I32(width),
-                Value::I32(height),
-                Value::I32(rowstride),
-                Value::Bool(has_alpha),
-                Value::I32(bits_per_sample),
-                Value::I32(channels),
-                Value::Array(
-                    image_bytes
-                        .into_iter()
-                        .map(Value::U8)
-                        .collect::<Vec<_>>()
-                        .into(),
-                ),
-            ]
-            .into(),
-        );
+        // Create byte array for image data
+        let byte_array: Array<'_> = image_bytes
+            .into_iter()
+            .map(Value::U8)
+            .collect::<Vec<_>>()
+            .try_into()
+            .expect("Failed to create byte array");
 
-        self.hints.insert("image-data".to_string(), image_struct);
+        // Create image-data structure as per freedesktop spec using StructureBuilder
+        let image_struct = StructureBuilder::new()
+            .add_field(width)
+            .add_field(height)
+            .add_field(rowstride)
+            .add_field(has_alpha)
+            .add_field(bits_per_sample)
+            .add_field(channels)
+            .append_field(Value::Array(byte_array))
+            .build()
+            .expect("Failed to build image-data structure");
+
+        self.hints
+            .insert("image-data".to_string(), Value::Structure(image_struct));
         self
     }
 

@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::runtime::Handle;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use zbus::object_server::{InterfaceRef, SignalEmitter};
 use zbus::{connection, interface, Connection};
 
@@ -2943,6 +2943,10 @@ impl DbusServer {
             .await
             .context("Failed to build DBus connection")?;
 
+        // Clone device_manager and connection_manager for the Open interface before moving to CConnectInterface
+        let device_manager_for_open = device_manager.clone();
+        let connection_manager_for_open = connection_manager.clone();
+
         // Create interface with connection reference
         // We pass the current Tokio handle so that zbus handlers can spawn tasks on the tokio runtime
         let interface = CConnectInterface::new(
@@ -2967,7 +2971,7 @@ impl DbusServer {
             .context("Failed to serve interface")?;
 
         // Register the Open interface on a separate path
-        let open_interface = OpenInterface::new(device_manager.clone());
+        let open_interface = OpenInterface::new(device_manager_for_open, connection_manager_for_open);
         connection
             .object_server()
             .at("/com/system76/CosmicConnect/Open", open_interface)
@@ -3291,12 +3295,20 @@ const ALLOWED_URL_SCHEMES: &[&str] = &[
 pub struct OpenInterface {
     /// Device manager for accessing connected devices
     device_manager: Arc<RwLock<DeviceManager>>,
+    /// Connection manager for sending packets
+    connection_manager: Arc<RwLock<ConnectionManager>>,
 }
 
 impl OpenInterface {
     /// Create a new OpenInterface
-    pub fn new(device_manager: Arc<RwLock<DeviceManager>>) -> Self {
-        Self { device_manager }
+    pub fn new(
+        device_manager: Arc<RwLock<DeviceManager>>,
+        connection_manager: Arc<RwLock<ConnectionManager>>,
+    ) -> Self {
+        Self {
+            device_manager,
+            connection_manager,
+        }
     }
 
     /// Validate URL scheme against allowed list
@@ -3313,14 +3325,16 @@ impl OpenInterface {
         let manager = self.device_manager.read().await;
 
         let device = match device_id {
-            Some(id) if !id.is_empty() => manager.get_device(id).ok_or_else(|| {
-                zbus::fdo::Error::Failed(format!("Device not found: {}", id))
-            })?,
+            Some(id) if !id.is_empty() => manager
+                .get_device(id)
+                .ok_or_else(|| {
+                    zbus::fdo::Error::Failed(format!("Device not found: {}", id))
+                })?
+                .clone(),
             _ => {
                 // Get first paired and reachable device with share capability
                 manager
                     .devices()
-                    .iter()
                     .find(|d| {
                         d.is_paired()
                             && d.is_reachable()
@@ -3395,10 +3409,15 @@ impl OpenInterface {
         let packet = Self::create_open_url_packet(url.clone());
         let request_id = packet.id.to_string();
 
-        device.send_packet(packet).await.map_err(|e| {
-            error!("Failed to send open URL packet: {}", e);
-            zbus::fdo::Error::Failed(format!("Failed to send packet: {}", e))
-        })?;
+        self.connection_manager
+            .read()
+            .await
+            .send_packet(&device.id(), &packet)
+            .await
+            .map_err(|e| {
+                error!("Failed to send open URL packet: {}", e);
+                zbus::fdo::Error::Failed(format!("Failed to send packet: {}", e))
+            })?;
 
         info!(
             "Sent open URL request {} to {}",
@@ -3474,7 +3493,6 @@ impl OpenInterface {
         let manager = self.device_manager.read().await;
         let devices: Vec<String> = manager
             .devices()
-            .iter()
             .filter(|d| {
                 d.is_paired()
                     && d.is_reachable()
