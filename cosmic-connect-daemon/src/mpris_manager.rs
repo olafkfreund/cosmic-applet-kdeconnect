@@ -335,6 +335,27 @@ impl MprisManager {
         Ok(())
     }
 
+    /// Raise player window (bring to front)
+    pub async fn raise(&self, player: &str) -> Result<()> {
+        let bus_name = Self::player_bus_name(player);
+        let root_proxy = zbus::Proxy::new(
+            &self.connection,
+            bus_name.as_str(),
+            Self::MPRIS_OBJECT_PATH,
+            MPRIS_INTERFACE,
+        )
+        .await
+        .context("Failed to create root proxy")?;
+
+        root_proxy
+            .call_method("Raise", &())
+            .await
+            .context("Failed to call Raise")?;
+
+        debug!("Raised player window for {}", player);
+        Ok(())
+    }
+
     /// Set absolute position
     pub async fn set_position(
         &self,

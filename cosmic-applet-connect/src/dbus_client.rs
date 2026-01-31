@@ -298,9 +298,7 @@ pub enum DaemonEvent {
         error: String,
     },
     /// Screen share requested by remote device
-    ScreenShareRequested {
-        device_id: String,
-    },
+    ScreenShareRequested { device_id: String },
     /// Screen share cursor position update
     ScreenShareCursorUpdate {
         device_id: String,
@@ -320,14 +318,9 @@ pub enum DaemonEvent {
         width: u8,
     },
     /// Screen share session started
-    ScreenShareStarted {
-        device_id: String,
-        is_sender: bool,
-    },
+    ScreenShareStarted { device_id: String, is_sender: bool },
     /// Screen share session stopped
-    ScreenShareStopped {
-        device_id: String,
-    },
+    ScreenShareStopped { device_id: String },
 }
 
 /// DBus proxy for COSMIC Connect daemon interface
@@ -401,6 +394,9 @@ trait CConnect {
 
     /// Seek MPRIS player position
     async fn mpris_seek(&self, player: &str, offset_microseconds: i64) -> zbus::fdo::Result<()>;
+
+    /// Raise MPRIS player window (bring to front)
+    async fn mpris_raise(&self, player: &str) -> zbus::fdo::Result<()>;
 
     /// Get device configuration (plugin settings)
     async fn get_device_config(&self, device_id: &str) -> zbus::fdo::Result<String>;
@@ -524,7 +520,13 @@ trait CConnect {
     async fn stop_screen_share(&self, device_id: &str) -> zbus::fdo::Result<()>;
 
     /// Send screen mirror input
-    async fn send_mirror_input(&self, device_id: String, x: f32, y: f32, action: String) -> zbus::fdo::Result<()>;
+    async fn send_mirror_input(
+        &self,
+        device_id: String,
+        x: f32,
+        y: f32,
+        action: String,
+    ) -> zbus::fdo::Result<()>;
 
     /// Signal: File transfer complete
     #[zbus(signal)]
@@ -1022,6 +1024,18 @@ impl DbusClient {
             .context("Failed to seek MPRIS player")
     }
 
+    /// Raise MPRIS player window (bring to front)
+    ///
+    /// # Arguments
+    /// * `player` - Player name
+    pub async fn mpris_raise(&self, player: &str) -> Result<()> {
+        info!("Raising MPRIS player window: {}", player);
+        self.proxy
+            .mpris_raise(player)
+            .await
+            .context("Failed to raise MPRIS player")
+    }
+
     /// Get device configuration (plugin settings)
     pub async fn get_device_config(&self, device_id: &str) -> Result<DeviceConfig> {
         debug!("Getting device config for {}", device_id);
@@ -1211,7 +1225,13 @@ impl DbusClient {
 
     /// Send screen mirror input
     #[allow(dead_code)]
-    pub async fn send_mirror_input(&self, device_id: String, x: f32, y: f32, action: String) -> Result<()> {
+    pub async fn send_mirror_input(
+        &self,
+        device_id: String,
+        x: f32,
+        y: f32,
+        action: String,
+    ) -> Result<()> {
         self.proxy
             .send_mirror_input(device_id, x, y, action)
             .await

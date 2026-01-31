@@ -292,8 +292,9 @@ struct CConnectApplet {
     drag_hover_device: Option<String>, // device_id being hovered with files
     dragging_files: bool,              // whether files are being dragged over window
     // Context menu state
-    context_menu_device: Option<String>,   // device_id with open context menu
+    context_menu_device: Option<String>, // device_id with open context menu
     context_menu_transfer: Option<String>, // transfer_id with open context menu
+    context_menu_mpris: bool,            // whether MPRIS context menu is open
     // Screen share state
     active_screen_share: Option<ActiveScreenShare>, // Currently active screen share session
 }
@@ -458,14 +459,19 @@ enum Message {
     FileDropped(std::path::PathBuf),
     SetDragHoverDevice(Option<String>),
     // Context menu (device)
-    ShowContextMenu(String),  // device_id
+    ShowContextMenu(String), // device_id
     CloseContextMenu,
     // Context menu (transfer)
     ShowTransferContextMenu(String), // transfer_id
     CloseTransferContextMenu,
-    CancelTransfer(String),           // transfer_id
-    OpenTransferFile(String),         // filename
-    RevealTransferFile(String),       // filename
+    CancelTransfer(String),     // transfer_id
+    OpenTransferFile(String),   // filename
+    RevealTransferFile(String), // filename
+    // Context menu (MPRIS)
+    ShowMprisContextMenu,
+    CloseMprisContextMenu,
+    ShowMprisTrackInfo, // Show notification with track info
+    RaiseMprisPlayer,   // Bring player window to front
     // Screen share control
     ScreenShareStarted(String, bool), // device_id, is_sender
     ScreenShareStopped(String),       // device_id
@@ -755,6 +761,7 @@ impl cosmic::Application for CConnectApplet {
             dragging_files: false,
             context_menu_device: None,
             context_menu_transfer: None,
+            context_menu_mpris: false,
             active_screen_share: None,
         };
         (app, Task::none())
@@ -1073,11 +1080,13 @@ impl cosmic::Application for CConnectApplet {
                             Ok(_) => Task::none(),
                             Err(e) => {
                                 tracing::error!("Failed to launch mirror app: {}", e);
-                                cosmic::task::message(cosmic::Action::App(Message::ShowNotification(
-                                    format!("Failed to launch mirror: {}", e),
-                                    NotificationType::Error,
-                                    None,
-                                )))
+                                cosmic::task::message(cosmic::Action::App(
+                                    Message::ShowNotification(
+                                        format!("Failed to launch mirror: {}", e),
+                                        NotificationType::Error,
+                                        None,
+                                    ),
+                                ))
                             }
                         }
                     }
@@ -1618,6 +1627,67 @@ impl cosmic::Application for CConnectApplet {
                 }
                 let _ = filename; // Used to identify which file, but we open parent dir
                 Task::none()
+            }
+            // MPRIS context menu
+            Message::ShowMprisContextMenu => {
+                self.context_menu_mpris = true;
+                Task::none()
+            }
+            Message::CloseMprisContextMenu => {
+                self.context_menu_mpris = false;
+                Task::none()
+            }
+            Message::ShowMprisTrackInfo => {
+                self.context_menu_mpris = false;
+
+                let Some(player) = &self.selected_player else {
+                    return Task::none();
+                };
+                let Some(state) = self.mpris_states.get(player) else {
+                    return Task::none();
+                };
+
+                let title = state.metadata.title.as_deref().unwrap_or("Unknown");
+                let artist = state.metadata.artist.as_deref().unwrap_or("Unknown");
+                let album = state.metadata.album.as_deref().unwrap_or("");
+
+                let info = match album.is_empty() {
+                    true => format!("{} - {}", title, artist),
+                    false => format!("{} - {} ({})", title, artist, album),
+                };
+
+                tracing::info!("Track info: {}", info);
+
+                if let Err(e) = std::process::Command::new("notify-send")
+                    .args(["Now Playing", &info])
+                    .spawn()
+                {
+                    tracing::warn!("Failed to show notification: {}", e);
+                }
+
+                Task::none()
+            }
+            Message::RaiseMprisPlayer => {
+                self.context_menu_mpris = false;
+
+                let Some(player) = &self.selected_player else {
+                    return Task::none();
+                };
+                let Some(client) = &self.dbus_client else {
+                    return Task::none();
+                };
+
+                let player_name = player.clone();
+                let client = client.clone();
+
+                Task::perform(
+                    async move {
+                        if let Err(e) = client.mpris_raise(&player_name).await {
+                            tracing::error!("Failed to raise player: {}", e);
+                        }
+                    },
+                    |_| cosmic::Action::App(Message::Tick(std::time::Instant::now())),
+                )
             }
             // Screen share control
             Message::ScreenShareStarted(device_id, is_sender) => {
@@ -2169,11 +2239,8 @@ impl CConnectApplet {
 
                 // Show context menu if this transfer's menu is open
                 if self.context_menu_transfer.as_ref() == Some(id) {
-                    let menu_items = self.build_transfer_context_menu(
-                        &transfer_id,
-                        &filename,
-                        is_receiving,
-                    );
+                    let menu_items =
+                        self.build_transfer_context_menu(&transfer_id, &filename, is_receiving);
 
                     let context_menu = container(column(menu_items).spacing(SPACE_XXXS))
                         .padding(SPACE_XXS)
@@ -2553,10 +2620,23 @@ impl CConnectApplet {
             return Element::from(cosmic::iced::widget::Space::new(0, 0));
         };
 
-        // Player name/label
+        // Player name/label with context menu button
+        let menu_message = if self.context_menu_mpris {
+            Message::CloseMprisContextMenu
+        } else {
+            Message::ShowMprisContextMenu
+        };
+
+        let menu_button = button::icon(icon::from_name("view-more-symbolic").size(ICON_S))
+            .padding(SPACE_XXS)
+            .class(cosmic::theme::Button::Transparent)
+            .on_press(menu_message);
+
         let player_name = row![
             icon::from_name("multimedia-player-symbolic").size(ICON_S),
             cosmic::widget::text::body(selected_player),
+            horizontal_space(),
+            menu_button,
         ]
         .spacing(SPACE_XS)
         .align_y(cosmic::iced::Alignment::Center);
@@ -2586,15 +2666,10 @@ impl CConnectApplet {
         let status = state
             .map(|s| s.playback_status)
             .unwrap_or(dbus_client::PlaybackStatus::Stopped);
-        let play_icon = if status == dbus_client::PlaybackStatus::Playing {
-            "media-playback-pause-symbolic"
-        } else {
-            "media-playback-start-symbolic"
-        };
-        let play_action = if status == dbus_client::PlaybackStatus::Playing {
-            "Pause"
-        } else {
-            "Play"
+
+        let (play_icon, play_action) = match status {
+            dbus_client::PlaybackStatus::Playing => ("media-playback-pause-symbolic", "Pause"),
+            _ => ("media-playback-start-symbolic", "Play"),
         };
 
         let controls = row![
@@ -2665,9 +2740,50 @@ impl CConnectApplet {
             .align_y(cosmic::iced::Alignment::Center)
         };
 
-        let content = column![player_name, info_row, controls]
+        let mut content = column![player_name, info_row, controls]
             .spacing(SPACE_S)
             .padding(Padding::from([SPACE_S, SPACE_M]));
+
+        // Show context menu if open
+        if self.context_menu_mpris {
+            let menu_item = |icon_name: &'static str,
+                             label: &'static str,
+                             message: Message|
+             -> Element<'_, Message> {
+                button::custom(
+                    row![
+                        icon::from_name(icon_name).size(ICON_S),
+                        text(label).size(ICON_14),
+                    ]
+                    .spacing(SPACE_S)
+                    .align_y(cosmic::iced::Alignment::Center),
+                )
+                .width(Length::Fill)
+                .padding([SPACE_XXS, SPACE_S])
+                .class(cosmic::theme::Button::MenuItem)
+                .on_press(message)
+                .into()
+            };
+
+            let menu_items = vec![
+                menu_item(
+                    "dialog-information-symbolic",
+                    "Show track info",
+                    Message::ShowMprisTrackInfo,
+                ),
+                menu_item(
+                    "window-maximize-symbolic",
+                    "Open player",
+                    Message::RaiseMprisPlayer,
+                ),
+            ];
+
+            let context_menu = container(column(menu_items).spacing(SPACE_XXXS))
+                .padding(SPACE_XXS)
+                .class(cosmic::theme::Container::Secondary);
+
+            content = content.push(context_menu);
+        }
 
         container(content)
             .width(Length::Fill)
@@ -2682,9 +2798,7 @@ impl CConnectApplet {
             .find(|d| d.device.info.device_id == device_id);
 
         let Some(device_state) = device_state else {
-            return container(text("Device not found"))
-                .padding(SPACE_M)
-                .into();
+            return container(text("Device not found")).padding(SPACE_M).into();
         };
 
         let device = &device_state.device;
@@ -2759,7 +2873,11 @@ impl CConnectApplet {
         content.into()
     }
 
-    fn device_row<'a>(&'a self, device_state: &'a DeviceState, device_index: usize) -> Element<'a, Message> {
+    fn device_row<'a>(
+        &'a self,
+        device_state: &'a DeviceState,
+        device_index: usize,
+    ) -> Element<'a, Message> {
         let device = &device_state.device;
         let device_id = &device.info.device_id;
 
@@ -2782,9 +2900,10 @@ impl CConnectApplet {
         let display_name = nickname.unwrap_or(&device.info.device_name);
 
         // Metadata row: Status • Battery • Last Seen
-        let mut metadata_row = row![
-            connection_status_styled_text(device.connection_state, device.pairing_status)
-        ]
+        let mut metadata_row = row![connection_status_styled_text(
+            device.connection_state,
+            device.pairing_status
+        )]
         .spacing(SPACE_XS)
         .align_y(cosmic::iced::Alignment::Center);
 
@@ -2827,12 +2946,9 @@ impl CConnectApplet {
         }
 
         // Combine Name + Metadata
-        let info_col = column![
-            cosmic::widget::text::heading(display_name),
-            metadata_row
-        ]
-        .spacing(SPACE_XXXS)
-        .width(Length::Fill);
+        let info_col = column![cosmic::widget::text::heading(display_name), metadata_row]
+            .spacing(SPACE_XXXS)
+            .width(Length::Fill);
 
         // Build actions
         let actions_row = self.build_device_actions(device, device_id);
@@ -2882,16 +2998,24 @@ impl CConnectApplet {
         // Add FileSync settings panel if active
         if self.file_sync_settings_device.as_ref() == Some(device_id) {
             content = content.push(
-                container(self.file_sync_settings_view(device_id))
-                    .padding(Padding::from([0.0, 0.0, 0.0, 48.0 + SPACE_S])),
+                container(self.file_sync_settings_view(device_id)).padding(Padding::from([
+                    0.0,
+                    0.0,
+                    0.0,
+                    48.0 + SPACE_S,
+                ])),
             );
         }
 
         // Add RunCommand settings panel if active
         if self.run_command_settings_device.as_ref() == Some(device_id) {
             content = content.push(
-                container(self.run_command_settings_view(device_id))
-                    .padding(Padding::from([0.0, 0.0, 0.0, 48.0 + SPACE_S])),
+                container(self.run_command_settings_view(device_id)).padding(Padding::from([
+                    0.0,
+                    0.0,
+                    0.0,
+                    48.0 + SPACE_S,
+                ])),
             );
         }
 
@@ -2908,8 +3032,7 @@ impl CConnectApplet {
             && device.is_paired()
             && device.has_incoming_capability("cconnect.share");
         let show_drop_zone = self.dragging_files && can_receive_files;
-        let is_drag_target = show_drop_zone
-            && self.drag_hover_device.as_ref() == Some(device_id);
+        let is_drag_target = show_drop_zone && self.drag_hover_device.as_ref() == Some(device_id);
 
         // Add drop zone indicator when dragging files
         if show_drop_zone {
@@ -3082,22 +3205,25 @@ impl CConnectApplet {
         // Context menu button (more options)
         let is_menu_open = self.context_menu_device.as_ref() == Some(&device_id.to_string());
         actions = actions.push(cosmic::widget::tooltip(
-            button::icon(icon::from_name(if is_menu_open {
-                "go-up-symbolic"
-            } else {
-                "view-more-symbolic"
-            }).size(ICON_S))
-                .on_press(if is_menu_open {
-                    Message::CloseContextMenu
+            button::icon(
+                icon::from_name(if is_menu_open {
+                    "go-up-symbolic"
                 } else {
-                    Message::ShowContextMenu(device_id.to_string())
+                    "view-more-symbolic"
                 })
-                .padding(SPACE_XS)
-                .class(if is_menu_open {
-                    cosmic::theme::Button::Suggested
-                } else {
-                    cosmic::theme::Button::Standard
-                }),
+                .size(ICON_S),
+            )
+            .on_press(if is_menu_open {
+                Message::CloseContextMenu
+            } else {
+                Message::ShowContextMenu(device_id.to_string())
+            })
+            .padding(SPACE_XS)
+            .class(if is_menu_open {
+                cosmic::theme::Button::Suggested
+            } else {
+                cosmic::theme::Button::Standard
+            }),
             "More options",
             cosmic::widget::tooltip::Position::Bottom,
         ));
@@ -3112,22 +3238,24 @@ impl CConnectApplet {
         filename: &str,
         is_receiving: bool,
     ) -> Vec<Element<'_, Message>> {
-        let menu_item =
-            |icon_name: &'static str, label: &'static str, message: Message| -> Element<'_, Message> {
-                button::custom(
-                    row![
-                        icon::from_name(icon_name).size(ICON_S),
-                        text(label).size(ICON_14),
-                    ]
-                    .spacing(SPACE_S)
-                    .align_y(cosmic::iced::Alignment::Center),
-                )
-                .width(Length::Fill)
-                .padding([SPACE_XXS, SPACE_S])
-                .class(cosmic::theme::Button::MenuItem)
-                .on_press(message)
-                .into()
-            };
+        let menu_item = |icon_name: &'static str,
+                         label: &'static str,
+                         message: Message|
+         -> Element<'_, Message> {
+            button::custom(
+                row![
+                    icon::from_name(icon_name).size(ICON_S),
+                    text(label).size(ICON_14),
+                ]
+                .spacing(SPACE_S)
+                .align_y(cosmic::iced::Alignment::Center),
+            )
+            .width(Length::Fill)
+            .padding([SPACE_XXS, SPACE_S])
+            .class(cosmic::theme::Button::MenuItem)
+            .on_press(message)
+            .into()
+        };
 
         let mut items = vec![menu_item(
             "process-stop-symbolic",
@@ -3165,12 +3293,9 @@ impl CConnectApplet {
                          style: cosmic::theme::Button|
          -> Element<'a, Message> {
             button::custom(
-                row![
-                    icon::from_name(icon_name).size(ICON_S),
-                    text(label),
-                ]
-                .spacing(SPACE_S)
-                .align_y(cosmic::iced::Alignment::Center),
+                row![icon::from_name(icon_name).size(ICON_S), text(label),]
+                    .spacing(SPACE_S)
+                    .align_y(cosmic::iced::Alignment::Center),
             )
             .on_press(message)
             .padding(SPACE_S)
@@ -3712,9 +3837,8 @@ impl CConnectApplet {
                     let row = row![
                         column![
                             text::body(&cmd.name),
-                            text::caption(&cmd.command).class(cosmic::theme::Text::Color(
-                                theme_muted_color(),
-                            )),
+                            text::caption(&cmd.command)
+                                .class(cosmic::theme::Text::Color(theme_muted_color(),)),
                         ]
                         .width(Length::Fill),
                         cosmic::widget::tooltip(
@@ -4293,9 +4417,9 @@ impl CConnectApplet {
 
             // If nothing was handled, close the popup
             if let Some(id) = self.popup {
-                return cosmic::task::message(cosmic::Action::Cosmic(cosmic::app::Action::Surface(
-                    destroy_popup(id),
-                )));
+                return cosmic::task::message(cosmic::Action::Cosmic(
+                    cosmic::app::Action::Surface(destroy_popup(id)),
+                ));
             }
         }
 
@@ -4307,20 +4431,18 @@ impl CConnectApplet {
                     "f" => cosmic::task::message(cosmic::Action::App(Message::SetFocus(
                         FocusTarget::Search,
                     ))),
-                    "," => {
-                        match self.get_settings_device_id() {
-                            Some(id) => cosmic::task::message(cosmic::Action::App(
-                                Message::ToggleDeviceSettings(id),
-                            )),
-                            None => cosmic::task::message(cosmic::Action::App(
-                                Message::ShowNotification(
-                                    "No paired devices available".into(),
-                                    NotificationType::Info,
-                                    None,
-                                ),
-                            )),
+                    "," => match self.get_settings_device_id() {
+                        Some(id) => cosmic::task::message(cosmic::Action::App(
+                            Message::ToggleDeviceSettings(id),
+                        )),
+                        None => {
+                            cosmic::task::message(cosmic::Action::App(Message::ShowNotification(
+                                "No paired devices available".into(),
+                                NotificationType::Info,
+                                None,
+                            )))
                         }
-                    }
+                    },
                     _ => Task::none(),
                 };
             }
@@ -4437,7 +4559,11 @@ impl CConnectApplet {
     /// Get device ID for opening settings: uses focused device or falls back to first paired device
     fn get_settings_device_id(&self) -> Option<String> {
         self.focused_device_index()
-            .and_then(|idx| self.filtered_devices().get(idx).map(|d| d.device.id().to_string()))
+            .and_then(|idx| {
+                self.filtered_devices()
+                    .get(idx)
+                    .map(|d| d.device.id().to_string())
+            })
             .or_else(|| {
                 self.devices
                     .iter()

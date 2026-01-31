@@ -330,9 +330,7 @@ impl CConnectInterface {
         let pairing_service = self
             .pairing_service
             .as_ref()
-            .ok_or_else(|| {
-                zbus::fdo::Error::Failed("Pairing service not initialized".to_string())
-            })?
+            .ok_or_else(|| zbus::fdo::Error::Failed("Pairing service not initialized".to_string()))?
             .clone();
 
         // Get device info from device manager
@@ -654,8 +652,8 @@ impl CConnectInterface {
         // This ensures all tokio operations have access to the runtime
         // We use self.tokio_handle.spawn() because the zbus executor doesn't have a tokio runtime context
         self.tokio_handle.spawn(async move {
-            use cosmic_connect_protocol::{FileTransferInfo, TlsPayloadServer};
             use cosmic_connect_protocol::plugins::share::{FileShareInfo, SharePlugin};
+            use cosmic_connect_protocol::{FileTransferInfo, TlsPayloadServer};
 
             // Extract file metadata (inside tokio runtime)
             let file_info = match FileTransferInfo::from_path(&file_path).await {
@@ -1705,33 +1703,44 @@ impl CConnectInterface {
     }
 
     /// Start screen share session
-    /// 
+    ///
     /// Configures the ScreenShare plugin with the local port to receive the stream.
     /// This triggers sending the ready packet to the remote device.
     ///
     /// # Arguments
     /// * `device_id` - The device ID
     /// * `port` - The local TCP port where the stream receiver is listening
-    async fn start_screen_share(&self, device_id: String, port: u16) -> Result<(), zbus::fdo::Error> {
-        info!("DBus: StartScreenShare called for {} on port {}", device_id, port);
-        
+    async fn start_screen_share(
+        &self,
+        device_id: String,
+        port: u16,
+    ) -> Result<(), zbus::fdo::Error> {
+        info!(
+            "DBus: StartScreenShare called for {} on port {}",
+            device_id, port
+        );
+
         let mut plugin_manager = self.plugin_manager.write().await;
-        
+
         if let Some(plugin) = plugin_manager.get_device_plugin_mut(&device_id, "screenshare") {
             use cosmic_connect_protocol::plugins::screenshare::ScreenSharePlugin;
-            
+
             if let Some(screenshare) = plugin.as_any_mut().downcast_mut::<ScreenSharePlugin>() {
                 screenshare.set_local_port(port).await.map_err(|e| {
                     zbus::fdo::Error::Failed(format!("Failed to set local port: {}", e))
                 })?;
-                
+
                 info!("Screen share configured for device {}", device_id);
                 Ok(())
             } else {
-                Err(zbus::fdo::Error::Failed("Plugin is not ScreenSharePlugin".to_string()))
+                Err(zbus::fdo::Error::Failed(
+                    "Plugin is not ScreenSharePlugin".to_string(),
+                ))
             }
         } else {
-            Err(zbus::fdo::Error::Failed("ScreenShare plugin not found".to_string()))
+            Err(zbus::fdo::Error::Failed(
+                "ScreenShare plugin not found".to_string(),
+            ))
         }
     }
 
@@ -1747,7 +1756,11 @@ impl CConnectInterface {
 
         // Check device is connected
         let device_manager = self.device_manager.read().await;
-        if !device_manager.get_device(&device_id).map(|d| d.is_connected()).unwrap_or(false) {
+        if !device_manager
+            .get_device(&device_id)
+            .map(|d| d.is_connected())
+            .unwrap_or(false)
+        {
             return Err(zbus::fdo::Error::Failed("Device not connected".to_string()));
         }
         drop(device_manager);
@@ -1768,10 +1781,14 @@ impl CConnectInterface {
                 info!("Screen share initiated to device {}", device_id);
                 Ok(())
             } else {
-                Err(zbus::fdo::Error::Failed("Plugin is not ScreenSharePlugin".to_string()))
+                Err(zbus::fdo::Error::Failed(
+                    "Plugin is not ScreenSharePlugin".to_string(),
+                ))
             }
         } else {
-            Err(zbus::fdo::Error::Failed("ScreenShare plugin not found".to_string()))
+            Err(zbus::fdo::Error::Failed(
+                "ScreenShare plugin not found".to_string(),
+            ))
         }
     }
 
@@ -1797,19 +1814,36 @@ impl CConnectInterface {
                 info!("Screen share stopped for device {}", device_id);
                 Ok(())
             } else {
-                Err(zbus::fdo::Error::Failed("Plugin is not ScreenSharePlugin".to_string()))
+                Err(zbus::fdo::Error::Failed(
+                    "Plugin is not ScreenSharePlugin".to_string(),
+                ))
             }
         } else {
-            Err(zbus::fdo::Error::Failed("ScreenShare plugin not found".to_string()))
+            Err(zbus::fdo::Error::Failed(
+                "ScreenShare plugin not found".to_string(),
+            ))
         }
     }
 
     /// Send input event for screen mirroring
-    async fn send_mirror_input(&self, device_id: String, x: f32, y: f32, action: String) -> Result<(), zbus::fdo::Error> {
-        debug!("DBus: SendMirrorInput called for {} (x: {}, y: {}, action: {})", device_id, x, y, action);
-        
+    async fn send_mirror_input(
+        &self,
+        device_id: String,
+        x: f32,
+        y: f32,
+        action: String,
+    ) -> Result<(), zbus::fdo::Error> {
+        debug!(
+            "DBus: SendMirrorInput called for {} (x: {}, y: {}, action: {})",
+            device_id, x, y, action
+        );
+
         let device_manager = self.device_manager.read().await;
-        if !device_manager.get_device(&device_id).map(|d| d.is_connected()).unwrap_or(false) {
+        if !device_manager
+            .get_device(&device_id)
+            .map(|d| d.is_connected())
+            .unwrap_or(false)
+        {
             return Err(zbus::fdo::Error::Failed("Device not connected".to_string()));
         }
         drop(device_manager);
@@ -1823,9 +1857,10 @@ impl CConnectInterface {
         let packet = Packet::new("cconnect.screenshare.input", body);
 
         let conn_manager = self.connection_manager.read().await;
-        conn_manager.send_packet(&device_id, &packet).await.map_err(|e| {
-            zbus::fdo::Error::Failed(format!("Failed to send input packet: {}", e))
-        })?;
+        conn_manager
+            .send_packet(&device_id, &packet)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to send input packet: {}", e)))?;
 
         Ok(())
     }
@@ -1977,6 +2012,28 @@ impl CConnectInterface {
             .map_err(|e| zbus::fdo::Error::Failed(format!("Seek failed: {}", e)))?;
 
         info!("DBus: Seek executed for {}", player);
+        Ok(())
+    }
+
+    /// Raise MPRIS player window (bring to front)
+    ///
+    /// # Arguments
+    /// * `player` - Player name
+    async fn mpris_raise(&self, player: String) -> Result<(), zbus::fdo::Error> {
+        info!("DBus: MprisRaise called: {}", player);
+
+        let Some(mpris_manager) = &self.mpris_manager else {
+            return Err(zbus::fdo::Error::Failed(
+                "MPRIS manager not available".to_string(),
+            ));
+        };
+
+        mpris_manager
+            .raise(&player)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(format!("Raise failed: {}", e)))?;
+
+        info!("DBus: Raise executed for {}", player);
         Ok(())
     }
 
