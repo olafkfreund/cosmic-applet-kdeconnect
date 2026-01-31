@@ -137,17 +137,17 @@ rustPlatform.buildRustPackage rec {
     Restart=on-failure
     RestartSec=5
 
-    # Security hardening
+    # Security hardening (ProtectHome=read-only allows reading but not writing to unspecified home paths)
     NoNewPrivileges=true
     ProtectSystem=strict
-    ProtectHome=true
+    ProtectHome=read-only
     PrivateTmp=true
     ProtectKernelTunables=true
     ProtectControlGroups=true
     RestrictSUIDSGID=true
 
-    # Allow access to config and data directories
-    ReadWritePaths=%h/.config/cosmic/cosmic-connect %h/.local/share/cosmic/cosmic-connect
+    # Allow write access to config and data directories
+    ReadWritePaths=%h/.config/cosmic %h/.local/share/cosmic
 
     # Network access required for device discovery and communication
     PrivateNetwork=false
@@ -180,17 +180,21 @@ rustPlatform.buildRustPackage rec {
     NoDisplay=false
     EOF
 
-    # Install desktop entry for applet
+    # Install desktop entry for applet (COSMIC panel integration)
     cat > $out/share/applications/cosmic-applet-connect.desktop << EOF
     [Desktop Entry]
     Type=Application
     Name=COSMIC Connect
     Comment=Device connectivity for COSMIC Desktop
+    Keywords=Cosmic;Iced;applet;connect;phone;device;sync;
     Icon=phone-symbolic
     Exec=$out/bin/cosmic-applet-connect
-    Categories=Network;System;
+    Categories=Cosmic;Iced;
+    Terminal=false
+    StartupNotify=true
     NoDisplay=true
-    X-COSMIC-Applet=true
+    X-CosmicApplet=true
+    X-CosmicHoverPopup=Auto
     EOF
   '';
 
