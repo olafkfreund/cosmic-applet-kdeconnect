@@ -292,7 +292,8 @@ struct CConnectApplet {
     drag_hover_device: Option<String>, // device_id being hovered with files
     dragging_files: bool,              // whether files are being dragged over window
     // Context menu state
-    context_menu_device: Option<String>, // device_id with open context menu
+    context_menu_device: Option<String>,   // device_id with open context menu
+    context_menu_transfer: Option<String>, // transfer_id with open context menu
     // Screen share state
     active_screen_share: Option<ActiveScreenShare>, // Currently active screen share session
 }
@@ -456,9 +457,15 @@ enum Message {
     FileDragLeave,
     FileDropped(std::path::PathBuf),
     SetDragHoverDevice(Option<String>),
-    // Context menu
+    // Context menu (device)
     ShowContextMenu(String),  // device_id
     CloseContextMenu,
+    // Context menu (transfer)
+    ShowTransferContextMenu(String), // transfer_id
+    CloseTransferContextMenu,
+    CancelTransfer(String),           // transfer_id
+    OpenTransferFile(String),         // filename
+    RevealTransferFile(String),       // filename
     // Screen share control
     ScreenShareStarted(String, bool), // device_id, is_sender
     ScreenShareStopped(String),       // device_id
@@ -747,6 +754,7 @@ impl cosmic::Application for CConnectApplet {
             drag_hover_device: None,
             dragging_files: false,
             context_menu_device: None,
+            context_menu_transfer: None,
             active_screen_share: None,
         };
         (app, Task::none())
@@ -1548,6 +1556,69 @@ impl cosmic::Application for CConnectApplet {
                 self.context_menu_device = None;
                 Task::none()
             }
+            // Transfer context menu
+            Message::ShowTransferContextMenu(transfer_id) => {
+                self.context_menu_transfer = Some(transfer_id);
+                Task::none()
+            }
+            Message::CloseTransferContextMenu => {
+                self.context_menu_transfer = None;
+                Task::none()
+            }
+            Message::CancelTransfer(transfer_id) => {
+                tracing::info!("Cancelling transfer {}", transfer_id);
+                self.context_menu_transfer = None;
+
+                if let Some(ref client) = self.dbus_client {
+                    let client = client.clone();
+                    let future = async move {
+                        if let Err(e) = client.cancel_transfer(&transfer_id).await {
+                            tracing::error!("Failed to cancel transfer: {}", e);
+                        }
+                    };
+                    return Task::perform(future, |_| {
+                        cosmic::Action::App(Message::Tick(std::time::Instant::now()))
+                    });
+                } else {
+                    tracing::error!("DBus client not available");
+                }
+                Task::none()
+            }
+            Message::OpenTransferFile(filename) => {
+                self.context_menu_transfer = None;
+                let downloads_dir = std::env::var("HOME")
+                    .map(|h| std::path::PathBuf::from(h).join("Downloads"))
+                    .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+                let file_path = downloads_dir.join(&filename);
+
+                if file_path.exists() {
+                    if let Err(e) = std::process::Command::new("xdg-open")
+                        .arg(&file_path)
+                        .spawn()
+                    {
+                        tracing::error!("Failed to open file: {}", e);
+                    }
+                } else {
+                    tracing::warn!("File not found: {:?}", file_path);
+                }
+                Task::none()
+            }
+            Message::RevealTransferFile(filename) => {
+                self.context_menu_transfer = None;
+                let downloads_dir = std::env::var("HOME")
+                    .map(|h| std::path::PathBuf::from(h).join("Downloads"))
+                    .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+
+                // Open the Downloads folder (parent directory of the file)
+                if let Err(e) = std::process::Command::new("xdg-open")
+                    .arg(&downloads_dir)
+                    .spawn()
+                {
+                    tracing::error!("Failed to open folder: {}", e);
+                }
+                let _ = filename; // Used to identify which file, but we open parent dir
+                Task::none()
+            }
             // Screen share control
             Message::ScreenShareStarted(device_id, is_sender) => {
                 tracing::info!(
@@ -2044,14 +2115,31 @@ impl CConnectApplet {
                 .padding(SPACE_XL),
             );
         } else {
-            for (_id, state) in &self.active_transfers {
+            for (id, state) in &self.active_transfers {
                 let progress = if state.total > 0 {
                     (state.current as f32 / state.total as f32) * 100.0
                 } else {
                     0.0
                 };
 
-                let row = row![
+                let transfer_id = id.clone();
+                let filename = state.filename.clone();
+                let is_receiving = state.direction != "sending";
+
+                // Context menu button
+                let menu_open = self.context_menu_transfer.as_ref() == Some(id);
+                let menu_message = if menu_open {
+                    Message::CloseTransferContextMenu
+                } else {
+                    Message::ShowTransferContextMenu(transfer_id.clone())
+                };
+
+                let menu_button = button::icon(icon::from_name("view-more-symbolic").size(ICON_S))
+                    .padding(SPACE_XXS)
+                    .class(cosmic::theme::Button::Transparent)
+                    .on_press(menu_message);
+
+                let mut transfer_row = row![
                     icon::from_name(if state.direction == "sending" {
                         "document-send-symbolic"
                     } else {
@@ -2073,13 +2161,29 @@ impl CConnectApplet {
                         ]
                     ]
                     .spacing(SPACE_XXS)
-                    .width(Length::Fill)
+                    .width(Length::Fill),
+                    menu_button,
                 ]
                 .spacing(SPACE_S)
                 .align_y(cosmic::iced::Alignment::Center);
 
+                // Show context menu if this transfer's menu is open
+                if self.context_menu_transfer.as_ref() == Some(id) {
+                    let menu_items = self.build_transfer_context_menu(
+                        &transfer_id,
+                        &filename,
+                        is_receiving,
+                    );
+
+                    let context_menu = container(column(menu_items).spacing(SPACE_XXXS))
+                        .padding(SPACE_XXS)
+                        .class(cosmic::theme::Container::Secondary);
+
+                    transfer_row = transfer_row.push(context_menu);
+                }
+
                 transfers_list = transfers_list.push(
-                    container(row)
+                    container(transfer_row)
                         .padding(SPACE_S)
                         .class(cosmic::theme::Container::Card),
                 );
@@ -2999,6 +3103,53 @@ impl CConnectApplet {
         ));
 
         actions
+    }
+
+    /// Build context menu items for a file transfer
+    fn build_transfer_context_menu(
+        &self,
+        transfer_id: &str,
+        filename: &str,
+        is_receiving: bool,
+    ) -> Vec<Element<'_, Message>> {
+        let menu_item =
+            |icon_name: &'static str, label: &'static str, message: Message| -> Element<'_, Message> {
+                button::custom(
+                    row![
+                        icon::from_name(icon_name).size(ICON_S),
+                        text(label).size(ICON_14),
+                    ]
+                    .spacing(SPACE_S)
+                    .align_y(cosmic::iced::Alignment::Center),
+                )
+                .width(Length::Fill)
+                .padding([SPACE_XXS, SPACE_S])
+                .class(cosmic::theme::Button::MenuItem)
+                .on_press(message)
+                .into()
+            };
+
+        let mut items = vec![menu_item(
+            "process-stop-symbolic",
+            "Cancel transfer",
+            Message::CancelTransfer(transfer_id.to_string()),
+        )];
+
+        if is_receiving {
+            items.push(divider::horizontal::default().into());
+            items.push(menu_item(
+                "document-open-symbolic",
+                "Open file",
+                Message::OpenTransferFile(filename.to_string()),
+            ));
+            items.push(menu_item(
+                "folder-open-symbolic",
+                "Reveal in folder",
+                Message::RevealTransferFile(filename.to_string()),
+            ));
+        }
+
+        items
     }
 
     /// Builds the context menu for a device

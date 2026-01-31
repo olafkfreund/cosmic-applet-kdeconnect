@@ -364,6 +364,9 @@ trait CConnect {
     /// Share a file with a device
     async fn share_file(&self, device_id: &str, path: &str) -> zbus::fdo::Result<()>;
 
+    /// Cancel an active file transfer
+    async fn cancel_transfer(&self, transfer_id: &str) -> zbus::fdo::Result<()>;
+
     /// Share text or URL with a device
     async fn share_text(&self, device_id: &str, text: &str) -> zbus::fdo::Result<()>;
 
@@ -899,6 +902,15 @@ impl DbusClient {
             .share_file(device_id, path)
             .await
             .context("Failed to share file")
+    }
+
+    /// Cancel an active file transfer
+    pub async fn cancel_transfer(&self, transfer_id: &str) -> Result<()> {
+        info!("Cancelling transfer {}", transfer_id);
+        self.proxy
+            .cancel_transfer(transfer_id)
+            .await
+            .context("Failed to cancel transfer")
     }
 
     /// Share text with a device
