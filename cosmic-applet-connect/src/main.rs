@@ -214,6 +214,21 @@ struct TransferState {
     direction: String,
 }
 
+/// A recently received file for history tracking
+#[derive(Debug, Clone)]
+struct ReceivedFile {
+    filename: String,
+    device_id: String,
+    device_name: String,
+    timestamp: std::time::Instant,
+    success: bool,
+}
+
+/// Maximum number of received files to track in history (memory limit)
+const MAX_RECEIVED_FILES_HISTORY: usize = 50;
+/// Number of recent files to display in the UI
+const MAX_DISPLAYED_HISTORY_ITEMS: usize = 10;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum OperationType {
     Ping,
@@ -254,6 +269,7 @@ struct CConnectApplet {
     mpris_album_art: HashMap<String, cosmic::iced::widget::image::Handle>,
     // File transfers
     active_transfers: HashMap<String, TransferState>,
+    received_files_history: Vec<ReceivedFile>,
     // Renaming state
     renaming_device: Option<String>,
     nickname_input: String,
@@ -746,6 +762,7 @@ impl cosmic::Application for CConnectApplet {
             mpris_states: std::collections::HashMap::new(),
             mpris_album_art: HashMap::new(),
             active_transfers: std::collections::HashMap::new(),
+            received_files_history: Vec::new(),
             renaming_device: None,
             nickname_input: String::new(),
             history: Vec::new(),
@@ -1781,12 +1798,22 @@ impl cosmic::Application for CConnectApplet {
                 );
                 Task::none()
             }
-            Message::TransferComplete(tid, _, _, success, _) => {
-                self.active_transfers.remove(&tid);
+            Message::TransferComplete(tid, device_id, filename, success, _error) => {
+                let transfer_state = self.active_transfers.remove(&tid);
+
                 if success {
                     tracing::info!("Transfer {} completed successfully", tid);
                 } else {
                     tracing::warn!("Transfer {} failed or cancelled", tid);
+                }
+
+                // Track received files in history (incoming transfers only)
+                let is_receiving = transfer_state
+                    .as_ref()
+                    .is_some_and(|s| s.direction == "receiving");
+
+                if is_receiving {
+                    self.record_received_file(device_id, filename, success);
                 }
                 Task::none()
             }
@@ -2171,6 +2198,45 @@ impl cosmic::Application for CConnectApplet {
 }
 
 impl CConnectApplet {
+    /// Formats a duration into a human-readable relative time string.
+    fn format_elapsed(elapsed: std::time::Duration) -> String {
+        let secs = elapsed.as_secs();
+        match secs {
+            0..=59 => "Just now".to_string(),
+            60..=3599 => format!("{}m ago", secs / 60),
+            3600..=86399 => format!("{}h ago", secs / 3600),
+            _ => format!("{}d ago", secs / 86400),
+        }
+    }
+
+    /// Records a received file in the history for display in the transfer queue view.
+    fn record_received_file(&mut self, device_id: String, filename: String, success: bool) {
+        let device_name = self
+            .devices
+            .iter()
+            .find(|d| d.device.id() == device_id)
+            .map(|d| d.device.name().to_string())
+            .unwrap_or_else(|| {
+                tracing::debug!(
+                    "Device {} not found when recording transfer history, using ID as name",
+                    device_id
+                );
+                device_id.clone()
+            });
+
+        let received_file = ReceivedFile {
+            filename,
+            device_id,
+            device_name,
+            timestamp: std::time::Instant::now(),
+            success,
+        };
+
+        self.received_files_history.insert(0, received_file);
+        self.received_files_history
+            .truncate(MAX_RECEIVED_FILES_HISTORY);
+    }
+
     fn history_view(&self) -> Element<'_, Message> {
         let mut history_list = column![].spacing(SPACE_XXS);
 
@@ -2296,6 +2362,79 @@ impl CConnectApplet {
             }
         }
 
+        // Build received files history section
+        let mut history_section = column![].spacing(SPACE_S);
+
+        if !self.received_files_history.is_empty() {
+            history_section = history_section.push(
+                row![
+                    icon::from_name("folder-recent-symbolic").size(ICON_S),
+                    cosmic::widget::text::heading("Recently Received"),
+                ]
+                .spacing(SPACE_S)
+                .align_y(cosmic::iced::Alignment::Center),
+            );
+
+            for received in self
+                .received_files_history
+                .iter()
+                .take(MAX_DISPLAYED_HISTORY_ITEMS)
+            {
+                let status_icon = if received.success {
+                    "emblem-ok-symbolic"
+                } else {
+                    "emblem-error-symbolic"
+                };
+                let time_str = Self::format_elapsed(received.timestamp.elapsed());
+
+                let open_button: Element<'_, Message> = if received.success {
+                    cosmic::widget::tooltip(
+                        button::icon(icon::from_name("document-open-symbolic").size(ICON_S))
+                            .padding(SPACE_XXS)
+                            .class(cosmic::theme::Button::Transparent)
+                            .on_press(Message::OpenTransferFile(received.filename.clone())),
+                        "Open file",
+                        cosmic::widget::tooltip::Position::Bottom,
+                    )
+                    .into()
+                } else {
+                    cosmic::iced::widget::Space::new(0, 0).into()
+                };
+
+                let file_row = row![
+                    icon::from_name("document-save-symbolic").size(ICON_S),
+                    column![
+                        text(&received.filename).size(ICON_14),
+                        row![
+                            icon::from_name(status_icon).size(ICON_XS),
+                            text(format!("from {} • {}", received.device_name, time_str))
+                                .size(ICON_XS),
+                        ]
+                        .spacing(SPACE_XXS)
+                        .align_y(cosmic::iced::Alignment::Center),
+                    ]
+                    .spacing(SPACE_XXS)
+                    .width(Length::Fill),
+                    open_button,
+                ]
+                .spacing(SPACE_S)
+                .align_y(cosmic::iced::Alignment::Center);
+
+                history_section = history_section.push(
+                    container(file_row)
+                        .padding(SPACE_S)
+                        .class(cosmic::theme::Container::Card),
+                );
+            }
+        }
+
+        // Combine active transfers and history
+        let mut all_content = column![transfers_list].spacing(SPACE_M);
+
+        if !self.received_files_history.is_empty() {
+            all_content = all_content.push(history_section);
+        }
+
         column![
             row![
                 cosmic::widget::tooltip(
@@ -2310,7 +2449,7 @@ impl CConnectApplet {
             ]
             .spacing(SPACE_S)
             .align_y(cosmic::iced::Alignment::Center),
-            scrollable(transfers_list).height(Length::Fill)
+            scrollable(all_content).height(Length::Fill)
         ]
         .spacing(SPACE_M)
         .padding(SPACE_M)
