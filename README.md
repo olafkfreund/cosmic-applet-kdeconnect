@@ -92,6 +92,69 @@ cosmic-connect-core (Shared Library)
 | **Adv** | Remote Desktop | ✅ | VNC screen sharing (Receiver) |
 | | Screen Mirroring | 🚧 | H.264 streaming (In Progress) |
 
+### Rich Notifications (Desktop to Android)
+
+COSMIC Connect supports forwarding desktop notifications to connected Android devices with full rich content preservation. Notifications are captured via DBus using the freedesktop.org notification specification and transmitted as extended protocol packets.
+
+#### Supported Rich Content
+
+| Content Type | Description |
+|-------------|-------------|
+| **Images** | Notification images from `image-data` hint or file paths (resized to 256x256, PNG encoded) |
+| **App Icons** | Application icons transmitted as base64-encoded PNG |
+| **Urgency** | Three levels: Low (0), Normal (1), Critical (2) |
+| **Categories** | Standard categories: `email`, `im.received`, `device`, `network`, etc. |
+| **Actions** | Interactive buttons with ID/label pairs (Reply, Mark Read, etc.) |
+| **HTML Body** | Rich text formatting preserved in `richBody` field |
+
+#### Protocol Packet Format
+
+Desktop notifications are sent as `cconnect.notification` packets:
+
+```json
+{
+  "id": 1234567890,
+  "type": "cconnect.notification",
+  "body": {
+    "id": "desktop-Thunderbird-1704067200000",
+    "appName": "Thunderbird",
+    "title": "New Email",
+    "text": "You have a new message from Alice",
+    "ticker": "Thunderbird: New Email - You have...",
+    "isClearable": true,
+    "time": "1704067200000",
+    "silent": "false",
+    "imageData": "<base64-png>",
+    "appIcon": "<base64-png>",
+    "urgency": 1,
+    "category": "email",
+    "actionButtons": [
+      {"id": "reply", "label": "Reply"},
+      {"id": "mark_read", "label": "Mark as Read"}
+    ]
+  }
+}
+```
+
+#### Configuration Options
+
+The notification listener is configured in the daemon configuration file:
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | bool | `true` | Enable/disable notification forwarding |
+| `excluded_apps` | string[] | `["CConnect", "cosmic-connect", "cosmic-notifications"]` | Apps to exclude (prevents loops) |
+| `included_apps` | string[] | `[]` | Whitelist mode (empty = all non-excluded) |
+| `include_transient` | bool | `true` | Forward transient notifications |
+| `include_low_urgency` | bool | `true` | Forward low-priority notifications |
+| `max_body_length` | number | `0` | Truncate body text (0 = no limit) |
+
+#### Bidirectional Sync
+
+- **Dismissal Sync**: Dismissing a notification on Android sends `isCancel: true` back to desktop
+- **Action Invocation**: Tapping action buttons sends `cconnect.notification.action` packet with action ID
+- **Request All**: Android can request all active notifications via `cconnect.notification.request`
+
 ### Recently Completed (Q1 2026)
 
 - **UI Overhaul**: Modern card-based device list, detailed device view, and transfer queue.
