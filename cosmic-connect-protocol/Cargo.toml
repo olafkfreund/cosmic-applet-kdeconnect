@@ -55,6 +55,10 @@ pipewire = { version = "0.8", optional = true }
 openh264 = { version = "0.6", optional = true }
 lz4 = { version = "1.25", optional = true }
 image = { version = "0.25", optional = true }
+
+# AudioStream plugin dependencies
+# Note: Requires libopus-dev system package
+opus = { version = "0.3", optional = true }
 notify = "8.2.0"
 blake3 = "1.8.3"
 walkdir = "2.5.0"
@@ -67,10 +71,12 @@ ashpd = { workspace = true, optional = true }
 
 [features]
 default = []
-remotedesktop = ["pipewire", "openh264", "lz4", "image"]
+remotedesktop = ["pipewire", "openh264", "lz4", "image", "ashpd"]
 low_latency = []
 screenshare = ["gstreamer", "gstreamer-app", "gstreamer-video", "image", "ashpd"]
 video = ["cosmic-connect-core/video"]
+audiostream = ["pipewire"]
+audiostream-opus = ["audiostream", "opus"]
 
 [dev-dependencies]
 tokio-test = "0.4"

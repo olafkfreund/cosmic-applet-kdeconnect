@@ -115,6 +115,9 @@ pub struct RemoteDesktopPlugin {
     /// Session manager (only with remotedesktop feature)
     #[cfg(feature = "remotedesktop")]
     session_manager: SessionManager,
+
+    /// Packet sender for response packets
+    packet_sender: Option<tokio::sync::mpsc::Sender<(String, Packet)>>,
 }
 
 impl RemoteDesktopPlugin {
@@ -125,6 +128,7 @@ impl RemoteDesktopPlugin {
             enabled: false,
             #[cfg(feature = "remotedesktop")]
             session_manager: SessionManager::new(),
+            packet_sender: None,
         }
     }
 }
@@ -168,9 +172,10 @@ impl Plugin for RemoteDesktopPlugin {
     async fn init(
         &mut self,
         device: &Device,
-        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+        packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
     ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
+        self.packet_sender = Some(packet_sender);
         info!(
             "RemoteDesktop plugin initialized for device {}",
             device.name()
@@ -241,15 +246,21 @@ impl RemoteDesktopPlugin {
                 warn!("Session already active, rejecting request");
 
                 // Send busy response
-                let _response = Packet::new(
+                let response = Packet::new(
                     "cconnect.remotedesktop.response",
                     json!({
                         "status": "busy",
                     }),
                 );
-                // TODO: Implement packet sending in Device
-                // device.send_packet(&response).await?;
-                warn!("Session already active, would send busy response");
+
+                if let (Some(device_id), Some(sender)) = (&self.device_id, &self.packet_sender) {
+                    if let Err(e) = sender.send((device_id.clone(), response)).await {
+                        warn!("Failed to send busy response packet: {}", e);
+                    }
+                } else {
+                    warn!("Cannot send busy response - plugin not properly initialized");
+                }
+
                 return Ok(());
             }
 
@@ -262,7 +273,7 @@ impl RemoteDesktopPlugin {
                     );
 
                     // Send ready response
-                    let _response = Packet::new(
+                    let response = Packet::new(
                         "cconnect.remotedesktop.response",
                         json!({
                             "status": "ready",
@@ -274,24 +285,36 @@ impl RemoteDesktopPlugin {
                             }
                         }),
                     );
-                    // TODO: Implement packet sending in Device
-                    // device.send_packet(&response).await?;
 
-                    info!("Session ready, would send response to {}", device.name());
+                    if let (Some(device_id), Some(sender)) = (&self.device_id, &self.packet_sender) {
+                        if let Err(e) = sender.send((device_id.clone(), response)).await {
+                            warn!("Failed to send ready response packet: {}", e);
+                        } else {
+                            info!("Session ready, sent response to {}", device.name());
+                        }
+                    } else {
+                        warn!("Cannot send ready response - plugin not properly initialized");
+                    }
                 }
                 Err(e) => {
                     error!("Failed to start session: {}", e);
 
                     // Send denied response
-                    let _response = Packet::new(
+                    let response = Packet::new(
                         "cconnect.remotedesktop.response",
                         json!({
                             "status": "denied",
                             "error": format!("{}", e),
                         }),
                     );
-                    // TODO: Implement packet sending in Device
-                    // device.send_packet(&response).await?;
+
+                    if let (Some(device_id), Some(sender)) = (&self.device_id, &self.packet_sender) {
+                        if let Err(e) = sender.send((device_id.clone(), response)).await {
+                            warn!("Failed to send denied response packet: {}", e);
+                        }
+                    } else {
+                        warn!("Cannot send denied response - plugin not properly initialized");
+                    }
                 }
             }
         }
@@ -300,15 +323,21 @@ impl RemoteDesktopPlugin {
         {
             let _ = packet;
             warn!("RemoteDesktop feature not enabled");
-            let _response = Packet::new(
+            let response = Packet::new(
                 "cconnect.remotedesktop.response",
                 json!({
                     "status": "denied",
                     "error": "RemoteDesktop feature not enabled",
                 }),
             );
-            // TODO: Implement packet sending in Device
-            // device.send_packet(&response).await?;
+
+            if let (Some(device_id), Some(sender)) = (&self.device_id, &self.packet_sender) {
+                if let Err(e) = sender.send((device_id.clone(), response)).await {
+                    warn!("Failed to send denied response packet: {}", e);
+                }
+            } else {
+                warn!("Cannot send denied response - plugin not properly initialized");
+            }
         }
 
         Ok(())
@@ -354,26 +383,38 @@ impl RemoteDesktopPlugin {
                 error!("Control action failed: {}", e);
 
                 // Send event notification
-                let _event = Packet::new(
+                let event = Packet::new(
                     "cconnect.remotedesktop.event",
                     json!({
                         "event": "error",
                         "message": format!("{}", e),
                     }),
                 );
-                // TODO: Implement packet sending in Device
-                // device.send_packet(&event).await?;
+
+                if let (Some(device_id), Some(sender)) = (&self.device_id, &self.packet_sender) {
+                    if let Err(e) = sender.send((device_id.clone(), event)).await {
+                        warn!("Failed to send error event packet: {}", e);
+                    }
+                } else {
+                    warn!("Cannot send error event - plugin not properly initialized");
+                }
             } else {
                 // Send success event
-                let _event = Packet::new(
+                let event = Packet::new(
                     "cconnect.remotedesktop.event",
                     json!({
                         "event": "control_success",
                         "action": action,
                     }),
                 );
-                // TODO: Implement packet sending in Device
-                // device.send_packet(&event).await?;
+
+                if let (Some(device_id), Some(sender)) = (&self.device_id, &self.packet_sender) {
+                    if let Err(e) = sender.send((device_id.clone(), event)).await {
+                        warn!("Failed to send success event packet: {}", e);
+                    }
+                } else {
+                    warn!("Cannot send success event - plugin not properly initialized");
+                }
             }
         }
 

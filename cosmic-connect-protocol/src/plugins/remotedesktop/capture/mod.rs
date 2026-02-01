@@ -32,7 +32,27 @@ pub use frame::{EncodedFrame, EncodingType, PixelFormat, QualityPreset, RawFrame
 
 use crate::Result;
 #[cfg(feature = "remotedesktop")]
-use tracing::{debug, info, warn};
+use ashpd::desktop::screencast::{CursorMode, Screencast, SourceType};
+#[cfg(feature = "remotedesktop")]
+use ashpd::desktop::PersistMode;
+#[cfg(feature = "remotedesktop")]
+use pipewire as pw;
+#[cfg(feature = "remotedesktop")]
+use pipewire::context::Context;
+#[cfg(feature = "remotedesktop")]
+use pipewire::main_loop::MainLoop;
+#[cfg(feature = "remotedesktop")]
+use pipewire::properties::properties;
+#[cfg(feature = "remotedesktop")]
+use pipewire::stream::{Stream, StreamFlags};
+#[cfg(feature = "remotedesktop")]
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+#[cfg(feature = "remotedesktop")]
+use std::sync::Arc;
+#[cfg(feature = "remotedesktop")]
+use tokio::sync::mpsc;
+#[cfg(feature = "remotedesktop")]
+use tracing::{debug, error, info, warn};
 
 /// Monitor information
 #[derive(Debug, Clone)]
@@ -70,6 +90,21 @@ pub struct WaylandCapture {
 
     /// PipeWire node ID (if streaming)
     pipewire_node: Option<u32>,
+
+    /// Flag to signal PipeWire thread to stop
+    running: Arc<AtomicBool>,
+
+    /// PipeWire thread handle
+    thread_handle: Option<std::thread::JoinHandle<()>>,
+
+    /// Frame receiver for captured frames
+    frame_receiver: Option<mpsc::Receiver<RawFrame>>,
+
+    /// Stream width (cached)
+    stream_width: Arc<AtomicU32>,
+
+    /// Stream height (cached)
+    stream_height: Arc<AtomicU32>,
 }
 
 #[cfg(feature = "remotedesktop")]
@@ -83,28 +118,35 @@ impl WaylandCapture {
             selected_monitors: Vec::new(),
             session_handle: None,
             pipewire_node: None,
+            running: Arc::new(AtomicBool::new(false)),
+            thread_handle: None,
+            frame_receiver: None,
+            stream_width: Arc::new(AtomicU32::new(1920)),
+            stream_height: Arc::new(AtomicU32::new(1080)),
         })
     }
 
     /// Enumerate available monitors via Desktop Portal
+    ///
+    /// Note: The portal API doesn't provide monitor enumeration before session creation.
+    /// This returns a generic monitor info that will be updated once capture starts.
     pub async fn enumerate_monitors(&self) -> Result<Vec<MonitorInfo>> {
         info!("Enumerating monitors via Desktop Portal");
 
-        // TODO: Phase 2 implementation
-        // Use ashpd to query org.freedesktop.portal.ScreenCast for available sources
-        // For now, return a mock monitor
-
-        let mock_monitor = MonitorInfo {
+        // The Desktop Portal API doesn't provide monitor enumeration upfront.
+        // Instead, the user selects monitors through the portal dialog.
+        // We return a placeholder that represents "all available monitors"
+        let monitor = MonitorInfo {
             id: "0".to_string(),
-            name: "Primary Display".to_string(),
+            name: "Available Displays".to_string(),
             width: 1920,
             height: 1080,
             refresh_rate: 60,
             is_primary: true,
         };
 
-        debug!("Found {} monitors", 1);
-        Ok(vec![mock_monitor])
+        debug!("Portal will present monitor selection dialog to user");
+        Ok(vec![monitor])
     }
 
     /// Select which monitors to capture
@@ -126,22 +168,74 @@ impl WaylandCapture {
 
         self.state = CaptureState::PermissionRequested;
 
-        // TODO: Desktop Portal implementation via zbus
-        // For Phase 2, simulate permission granted
-        // In full implementation:
-        // 1. Connect to org.freedesktop.portal.Desktop via zbus
-        // 2. Call CreateSession on org.freedesktop.portal.ScreenCast
-        // 3. Call SelectSources with monitor selection
-        // 4. Call Start to show permission dialog
-        // 5. Await response signal
-        // 6. Extract PipeWire node ID from response
+        // Create the screencast portal proxy
+        let screencast = Screencast::new()
+            .await
+            .map_err(|e| crate::ProtocolError::invalid_state(format!("Failed to create screencast: {}", e)))?;
 
-        // Mock: Auto-grant permission for development/testing
-        debug!("Mock: Simulating permission granted");
+        // Create a session
+        let session = screencast
+            .create_session()
+            .await
+            .map_err(|e| crate::ProtocolError::invalid_state(format!("Failed to create session: {}", e)))?;
+
+        debug!("Portal session created");
+
+        // Select sources - request monitor capture
+        screencast
+            .select_sources(
+                &session,
+                CursorMode::Embedded,      // Include cursor in the stream
+                SourceType::Monitor.into(), // Capture monitors only
+                false,                      // Don't allow multiple sources
+                None,                       // No restore token
+                PersistMode::DoNot,         // Don't persist
+            )
+            .await
+            .map_err(|e| crate::ProtocolError::invalid_state(format!("Failed to select sources: {}", e)))?;
+
+        debug!("Sources selected, starting portal session");
+
+        // Start the session - this shows the permission dialog
+        let streams = screencast
+            .start(&session, None)
+            .await
+            .map_err(|e| {
+                crate::ProtocolError::invalid_state(format!("Failed to start session: {}", e))
+            })?
+            .response()
+            .map_err(|e| {
+                crate::ProtocolError::invalid_state(format!("Portal response error: {}", e))
+            })?;
+
+        // Get streams from response
+        if streams.streams().is_empty() {
+            return Err(crate::ProtocolError::invalid_state(
+                "No streams returned from portal"
+            ));
+        }
+
+        // Get the first stream's PipeWire node ID
+        let stream_info = &streams.streams()[0];
+        let pipewire_node_id = stream_info.pipe_wire_node_id();
+        let stream_size = stream_info.size();
+
+        info!(
+            "Portal session started - PipeWire node: {}, size: {:?}",
+            pipewire_node_id, stream_size
+        );
+
+        // Update stream dimensions if available
+        if let Some((width, height)) = stream_size {
+            self.stream_width.store(width as u32, Ordering::Relaxed);
+            self.stream_height.store(height as u32, Ordering::Relaxed);
+        }
+
         self.state = CaptureState::PermissionGranted;
-        self.session_handle = Some("mock_session_handle".to_string());
-        self.pipewire_node = Some(42); // Mock node ID
+        self.session_handle = Some(format!("{:?}", session));
+        self.pipewire_node = Some(pipewire_node_id);
 
+        info!("Permission granted for screen capture");
         Ok(())
     }
 
@@ -156,71 +250,75 @@ impl WaylandCapture {
             ));
         }
 
+        let node_id = self.pipewire_node.ok_or_else(|| {
+            crate::ProtocolError::invalid_state("No PipeWire node ID available")
+        })?;
+
+        // Create frame channel
+        let (tx, rx) = mpsc::channel(32);
+        self.frame_receiver = Some(rx);
+
+        // Start PipeWire stream in background thread
+        let running = Arc::new(AtomicBool::new(true));
+        self.running = running.clone();
+
+        let stream_width = self.stream_width.clone();
+        let stream_height = self.stream_height.clone();
+
+        let thread_handle = std::thread::spawn(move || {
+            if let Err(e) = run_pipewire_loop(node_id, tx, running, stream_width, stream_height) {
+                error!("PipeWire loop error: {}", e);
+            }
+        });
+
+        self.thread_handle = Some(thread_handle);
         self.state = CaptureState::Capturing;
 
-        // TODO: PipeWire implementation
-        // In full implementation:
-        // 1. Create PipeWire stream from node ID
-        // 2. Connect stream listener callbacks
-        // 3. Configure format negotiation (prefer RGBA)
-        // 4. Set buffer parameters
-        // 5. Start stream
-        //
-        // Example pseudocode:
-        // let core = pipewire::Core::new()?;
-        // let stream = pipewire::stream::Stream::new(&core, self.pipewire_node.unwrap())?;
-        // stream.connect(...)?;
+        // Wait briefly for stream to connect
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        info!(
-            "Mock: Screen capture session started with node {}",
-            self.pipewire_node.unwrap()
-        );
+        info!("Screen capture session started with node {}", node_id);
         Ok(())
     }
 
     /// Capture a single frame
-    pub async fn capture_frame(&self) -> Result<RawFrame> {
+    ///
+    /// This method receives frames from the PipeWire background thread.
+    /// Frames are captured asynchronously as they arrive from the compositor.
+    pub async fn capture_frame(&mut self) -> Result<RawFrame> {
         if self.state != CaptureState::Capturing {
             return Err(crate::ProtocolError::invalid_state(
                 "Capture session not active",
             ));
         }
 
-        // TODO: PipeWire implementation
-        // In full implementation:
-        // 1. Await next PipeWire buffer via stream callback
-        // 2. Lock buffer and read pixel data
-        // 3. Convert SPA format to PixelFormat
-        // 4. Copy data into RawFrame
-        // 5. Release buffer
-        //
-        // Example pseudocode:
-        // let buffer = stream.dequeue_buffer().await?;
-        // let data = buffer.datas()[0];
-        // let pixels = data.as_slice();
-        // let frame = RawFrame::new(width, height, format, pixels.to_vec());
+        // Try to receive a frame from the channel (non-blocking with timeout)
+        let frame_rx = self.frame_receiver.as_mut().ok_or_else(|| {
+            crate::ProtocolError::invalid_state("Frame channel not initialized")
+        })?;
 
-        // Mock: Generate test pattern frame
-        let width = 1920;
-        let height = 1080;
-        let mut data = Vec::with_capacity((width * height * 4) as usize);
+        // Wait for next frame with timeout
+        match tokio::time::timeout(
+            tokio::time::Duration::from_millis(100),
+            frame_rx.recv()
+        ).await {
+            Ok(Some(frame)) => {
+                debug!("Captured frame {}x{}", frame.width, frame.height);
+                Ok(frame)
+            }
+            Ok(None) => {
+                Err(crate::ProtocolError::invalid_state("Frame channel closed"))
+            }
+            Err(_) => {
+                // Timeout - generate fallback frame
+                let width = self.stream_width.load(Ordering::Relaxed);
+                let height = self.stream_height.load(Ordering::Relaxed);
+                let data = vec![0u8; (width * height * 4) as usize];
 
-        // Create a simple gradient test pattern (RGBA)
-        for y in 0..height {
-            for x in 0..width {
-                let r = ((x as f32 / width as f32) * 255.0) as u8;
-                let g = ((y as f32 / height as f32) * 255.0) as u8;
-                let b = 128u8;
-                let a = 255u8;
-                data.push(r);
-                data.push(g);
-                data.push(b);
-                data.push(a);
+                debug!("Frame timeout, returning black frame {}x{}", width, height);
+                Ok(RawFrame::new(width, height, PixelFormat::RGBA, data))
             }
         }
-
-        debug!("Mock: Generated test pattern frame {}x{}", width, height);
-        Ok(RawFrame::new(width, height, PixelFormat::RGBA, data))
     }
 
     /// Stop screen capture session
@@ -232,11 +330,16 @@ impl WaylandCapture {
             return Ok(());
         }
 
-        // TODO: Phase 2 implementation
-        // 1. Disconnect PipeWire stream
-        // 2. Close portal session
-        // 3. Cleanup resources
+        // Signal PipeWire thread to stop
+        self.running.store(false, Ordering::SeqCst);
 
+        // Wait for thread to finish
+        if let Some(handle) = self.thread_handle.take() {
+            handle.join().ok();
+        }
+
+        // Cleanup
+        self.frame_receiver = None;
         self.state = CaptureState::Idle;
         self.session_handle = None;
         self.pipewire_node = None;
@@ -323,6 +426,151 @@ pub enum CaptureState {
 
     /// Error state
     Error,
+}
+
+/// Run the PipeWire main loop (called from background thread)
+#[cfg(feature = "remotedesktop")]
+fn run_pipewire_loop(
+    node_id: u32,
+    frame_sender: mpsc::Sender<RawFrame>,
+    running: Arc<AtomicBool>,
+    stream_width: Arc<AtomicU32>,
+    stream_height: Arc<AtomicU32>,
+) -> Result<()> {
+    // Initialize PipeWire
+    pw::init();
+
+    // Create main loop
+    let mainloop = MainLoop::new(None).map_err(|e| {
+        crate::ProtocolError::invalid_state(format!(
+            "Failed to create PipeWire main loop: {}",
+            e
+        ))
+    })?;
+
+    let loop_ = mainloop.loop_();
+
+    // Create context
+    let context = Context::new(&mainloop).map_err(|e| {
+        crate::ProtocolError::invalid_state(format!("Failed to create context: {}", e))
+    })?;
+
+    // Connect to PipeWire server
+    let core = context.connect(None).map_err(|e| {
+        crate::ProtocolError::invalid_state(format!("Failed to connect to PipeWire: {}", e))
+    })?;
+
+    // Create stream
+    let stream = Stream::new(
+        &core,
+        "cosmic-connect-remotedesktop",
+        properties! {
+            *pw::keys::MEDIA_TYPE => "Video",
+            *pw::keys::MEDIA_CATEGORY => "Capture",
+            *pw::keys::MEDIA_ROLE => "Screen",
+        },
+    )
+    .map_err(|e| {
+        crate::ProtocolError::invalid_state(format!("Failed to create stream: {}", e))
+    })?;
+
+    // Frame counter for sequencing (unused for now, but may be useful for debugging)
+    let _frame_sequence = Arc::new(AtomicU64::new(0));
+
+    let stream_width_clone = stream_width.clone();
+    let stream_height_clone = stream_height.clone();
+    let running_clone = running.clone();
+
+    // Add stream listener
+    let _listener = stream
+        .add_local_listener_with_user_data(frame_sender)
+        .state_changed(move |_stream, _user_data, old, new| {
+            debug!("Stream state changed: {:?} -> {:?}", old, new);
+        })
+        .process(move |stream, frame_tx| {
+            // Check if we should still be running
+            if !running_clone.load(Ordering::SeqCst) {
+                return;
+            }
+
+            // Dequeue buffer
+            if let Some(mut buffer) = stream.dequeue_buffer() {
+                let datas = buffer.datas_mut();
+                if let Some(data) = datas.first_mut() {
+                    let chunk = data.chunk();
+                    let offset = chunk.offset() as usize;
+                    let size = chunk.size() as usize;
+                    let stride = chunk.stride() as usize;
+
+                    if let Some(slice) = data.data() {
+                        if size > 0 && offset + size <= slice.len() {
+                            let frame_data = slice[offset..offset + size].to_vec();
+
+                            let width = stream_width_clone.load(Ordering::Relaxed);
+                            let height = stream_height_clone.load(Ordering::Relaxed);
+
+                            // Infer dimensions from stride if needed
+                            let inferred_width = if stride > 0 {
+                                (stride / 4) as u32
+                            } else {
+                                width
+                            };
+                            let inferred_height = if size > 0 && stride > 0 {
+                                (size / stride) as u32
+                            } else {
+                                height
+                            };
+
+                            let frame = RawFrame::new(
+                                inferred_width,
+                                inferred_height,
+                                PixelFormat::RGBA, // Most common format from screen capture
+                                frame_data,
+                            );
+
+                            // Try to send frame (non-blocking)
+                            if let Err(e) = frame_tx.try_send(frame) {
+                                if matches!(e, mpsc::error::TrySendError::Full(_)) {
+                                    debug!("Frame channel full, dropping frame");
+                                } else {
+                                    warn!("Failed to send frame: {}", e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        .register()
+        .map_err(|e| {
+            crate::ProtocolError::invalid_state(format!("Failed to register listener: {}", e))
+        })?;
+
+    // Connect to the portal's PipeWire node
+    stream
+        .connect(
+            pw::spa::utils::Direction::Input,
+            Some(node_id),
+            StreamFlags::AUTOCONNECT | StreamFlags::MAP_BUFFERS,
+            &mut [],
+        )
+        .map_err(|e| {
+            crate::ProtocolError::invalid_state(format!(
+                "Failed to connect stream to node {}: {}",
+                node_id, e
+            ))
+        })?;
+
+    info!("PipeWire stream connected to node {}", node_id);
+
+    // Run the main loop until stopped
+    while running.load(Ordering::SeqCst) {
+        // Iterate the loop with a timeout
+        loop_.iterate(std::time::Duration::from_millis(100));
+    }
+
+    info!("PipeWire main loop exited");
+    Ok(())
 }
 
 #[cfg(test)]

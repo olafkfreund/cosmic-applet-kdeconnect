@@ -194,6 +194,7 @@ impl EdgeDetector {
     fn check_debounce(&self, edge: &ScreenEdge) -> bool {
         if let Ok(guard) = self.last_edge.read() {
             if let Some((last_edge, last_time)) = *guard {
+                let last_time: Instant = last_time;
                 if last_edge == *edge
                     && last_time.elapsed() < Duration::from_millis(self.debounce_ms)
                 {

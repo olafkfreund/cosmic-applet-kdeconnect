@@ -177,7 +177,7 @@ impl StreamingSession {
 
     /// Capture loop (runs in separate task)
     async fn capture_loop(
-        capture: WaylandCapture,
+        mut capture: WaylandCapture,
         tx: mpsc::Sender<RawFrame>,
         state: Arc<RwLock<StreamState>>,
         stats: Arc<RwLock<StreamStats>>,

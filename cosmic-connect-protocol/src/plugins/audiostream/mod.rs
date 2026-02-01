@@ -52,11 +52,24 @@
 use crate::plugins::{Plugin, PluginFactory};
 use crate::{Device, Packet, ProtocolError, Result};
 use async_trait::async_trait;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tokio::sync::{mpsc, RwLock};
+use tracing::{debug, error, info, warn};
+
+#[cfg(feature = "audiostream")]
+mod audio_backend;
+
+#[cfg(feature = "audiostream")]
+mod codec;
+
+#[cfg(feature = "audiostream")]
+use audio_backend::{AudioBackend, AudioSample, BackendConfig};
+
+#[cfg(feature = "audiostream")]
+use codec::{OpusCodec, PcmCodec};
 
 const PLUGIN_NAME: &str = "audiostream";
 const INCOMING_CAPABILITY: &str = "cconnect.audiostream";
@@ -222,7 +235,6 @@ impl StreamConfig {
 }
 
 /// Active audio stream state
-#[derive(Debug)]
 struct AudioStream {
     /// Stream configuration
     config: StreamConfig,
@@ -237,9 +249,23 @@ struct AudioStream {
     packet_count: u64,
 
     /// Audio buffer (for playback)
-    /// TODO: Implement actual audio buffering
-    #[allow(dead_code)]
-    buffer: Vec<u8>,
+    buffer: std::collections::VecDeque<Vec<u8>>,
+
+    #[cfg(feature = "audiostream")]
+    /// Opus codec instance
+    opus_codec: Option<OpusCodec>,
+
+    #[cfg(feature = "audiostream")]
+    /// PCM codec instance
+    pcm_codec: Option<PcmCodec>,
+
+    #[cfg(feature = "audiostream")]
+    /// Audio capture channel receiver
+    capture_rx: Option<mpsc::Receiver<Vec<AudioSample>>>,
+
+    #[cfg(feature = "audiostream")]
+    /// Audio playback channel sender
+    playback_tx: Option<mpsc::Sender<Vec<AudioSample>>>,
 }
 
 impl AudioStream {
@@ -249,11 +275,18 @@ impl AudioStream {
             started_at: std::time::Instant::now(),
             bytes_streamed: 0,
             packet_count: 0,
-            buffer: Vec::new(),
+            buffer: std::collections::VecDeque::new(),
+            #[cfg(feature = "audiostream")]
+            opus_codec: None,
+            #[cfg(feature = "audiostream")]
+            pcm_codec: None,
+            #[cfg(feature = "audiostream")]
+            capture_rx: None,
+            #[cfg(feature = "audiostream")]
+            playback_tx: None,
         }
     }
 
-    #[allow(dead_code)]
     fn update_stats(&mut self, bytes: u64) {
         self.bytes_streamed += bytes;
         self.packet_count += 1;
@@ -307,19 +340,40 @@ pub struct AudioStreamPlugin {
     incoming_stream: Arc<RwLock<Option<AudioStream>>>,
 
     /// Supported codecs on this system
-    /// TODO: Detect from audio backend
     supported_codecs: Vec<AudioCodec>,
+
+    #[cfg(feature = "audiostream")]
+    /// Audio backend for capture and playback
+    audio_backend: Option<Arc<RwLock<AudioBackend>>>,
+
+    /// Packet sender for outgoing audio data
+    packet_sender: Option<mpsc::Sender<(String, Packet)>>,
 }
 
 impl AudioStreamPlugin {
     /// Create new audio stream plugin instance
     pub fn new() -> Self {
+        let mut supported_codecs = Vec::new();
+
+        #[cfg(feature = "audiostream")]
+        {
+            // PCM is always supported when audiostream feature is enabled
+            supported_codecs.push(AudioCodec::Pcm);
+
+            // Opus only if the opus feature is enabled
+            #[cfg(feature = "opus")]
+            supported_codecs.push(AudioCodec::Opus);
+        }
+
         Self {
             device_id: None,
             enabled: false,
             outgoing_stream: Arc::new(RwLock::new(None)),
             incoming_stream: Arc::new(RwLock::new(None)),
-            supported_codecs: vec![AudioCodec::Opus, AudioCodec::Pcm, AudioCodec::Aac],
+            supported_codecs,
+            #[cfg(feature = "audiostream")]
+            audio_backend: None,
+            packet_sender: None,
         }
     }
 
@@ -335,31 +389,121 @@ impl AudioStreamPlugin {
             config.channels
         );
 
-        match config.direction {
-            StreamDirection::Output => {
-                // Stop existing outgoing stream if any
-                self.stop_outgoing_stream().await?;
+        #[cfg(feature = "audiostream")]
+        {
+            match config.direction {
+                StreamDirection::Output => {
+                    // Stop existing outgoing stream if any
+                    self.stop_outgoing_stream().await?;
 
-                // Create new outgoing stream
-                let stream = AudioStream::new(config.clone());
-                *self.outgoing_stream.write().await = Some(stream);
+                    // Create audio backend if needed
+                    if self.audio_backend.is_none() {
+                        let backend_config = BackendConfig {
+                            sample_rate: config.sample_rate,
+                            channels: config.channels,
+                            buffer_size: (config.sample_rate as usize * config.buffer_size_ms as usize) / 1000,
+                        };
+                        let backend = AudioBackend::new(backend_config)?;
+                        self.audio_backend = Some(Arc::new(RwLock::new(backend)));
+                    }
 
-                // TODO: Initialize audio capture from PipeWire/PulseAudio
-                // TODO: Start encoding thread
-                info!("Outgoing audio stream started");
+                    // Create new outgoing stream
+                    let mut stream = AudioStream::new(config.clone());
+
+                    // Initialize codec
+                    match config.codec {
+                        AudioCodec::Opus => {
+                            stream.opus_codec = Some(OpusCodec::new(
+                                config.sample_rate,
+                                config.channels,
+                                config.bitrate,
+                            )?);
+                        }
+                        AudioCodec::Pcm => {
+                            stream.pcm_codec = Some(PcmCodec::new(
+                                config.sample_rate,
+                                config.channels,
+                            ));
+                        }
+                        AudioCodec::Aac => {
+                            return Err(ProtocolError::InvalidPacket(
+                                "AAC codec not yet implemented".to_string(),
+                            ));
+                        }
+                    }
+
+                    // Start audio capture
+                    if let Some(backend) = &mut self.audio_backend {
+                        let capture_rx = backend.write().await.start_capture()?;
+                        stream.capture_rx = Some(capture_rx);
+                    }
+
+                    *self.outgoing_stream.write().await = Some(stream);
+
+                    // Start encoding and sending task
+                    self.start_outgoing_task().await?;
+
+                    info!("Outgoing audio stream started");
+                }
+                StreamDirection::Input => {
+                    // Stop existing incoming stream if any
+                    self.stop_incoming_stream().await?;
+
+                    // Create audio backend if needed
+                    if self.audio_backend.is_none() {
+                        let backend_config = BackendConfig {
+                            sample_rate: config.sample_rate,
+                            channels: config.channels,
+                            buffer_size: (config.sample_rate as usize * config.buffer_size_ms as usize) / 1000,
+                        };
+                        let backend = AudioBackend::new(backend_config)?;
+                        self.audio_backend = Some(Arc::new(RwLock::new(backend)));
+                    }
+
+                    // Create new incoming stream
+                    let mut stream = AudioStream::new(config.clone());
+
+                    // Initialize codec
+                    match config.codec {
+                        AudioCodec::Opus => {
+                            stream.opus_codec = Some(OpusCodec::new(
+                                config.sample_rate,
+                                config.channels,
+                                config.bitrate,
+                            )?);
+                        }
+                        AudioCodec::Pcm => {
+                            stream.pcm_codec = Some(PcmCodec::new(
+                                config.sample_rate,
+                                config.channels,
+                            ));
+                        }
+                        AudioCodec::Aac => {
+                            return Err(ProtocolError::InvalidPacket(
+                                "AAC codec not yet implemented".to_string(),
+                            ));
+                        }
+                    }
+
+                    // Start audio playback
+                    if let Some(backend) = &mut self.audio_backend {
+                        let playback_tx = backend.write().await.start_playback()?;
+                        stream.playback_tx = Some(playback_tx);
+                    }
+
+                    *self.incoming_stream.write().await = Some(stream);
+
+                    // Start decoding and playback task
+                    self.start_incoming_task().await?;
+
+                    info!("Incoming audio stream started");
+                }
             }
-            StreamDirection::Input => {
-                // Stop existing incoming stream if any
-                self.stop_incoming_stream().await?;
+        }
 
-                // Create new incoming stream
-                let stream = AudioStream::new(config.clone());
-                *self.incoming_stream.write().await = Some(stream);
-
-                // TODO: Initialize audio playback sink
-                // TODO: Start decoding thread
-                info!("Incoming audio stream started");
-            }
+        #[cfg(not(feature = "audiostream"))]
+        {
+            warn!("Audio streaming requires 'audiostream' feature to be enabled");
         }
 
         Ok(())
@@ -421,20 +565,167 @@ impl AudioStreamPlugin {
         Ok(())
     }
 
+    #[cfg(feature = "audiostream")]
+    /// Start outgoing audio encoding and transmission task
+    async fn start_outgoing_task(&mut self) -> Result<()> {
+        let outgoing_stream = self.outgoing_stream.clone();
+        let packet_sender = self.packet_sender.clone();
+        let device_id = self.device_id.clone();
+
+        tokio::spawn(async move {
+            loop {
+                let mut stream_lock = outgoing_stream.write().await;
+                if let Some(stream) = stream_lock.as_mut() {
+                    // Try to receive samples
+                    let samples = if let Some(capture_rx) = &mut stream.capture_rx {
+                        match capture_rx.try_recv() {
+                            Ok(samples) => samples,
+                            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                                drop(stream_lock);
+                                tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+                                continue;
+                            }
+                            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                                debug!("Capture channel disconnected");
+                                break;
+                            }
+                        }
+                    } else {
+                        break;
+                    };
+
+                    // Encode samples based on codec
+                    let encoded = if let Some(opus) = &mut stream.opus_codec {
+                        match opus.encode(&samples) {
+                            Ok(data) => data,
+                            Err(e) => {
+                                error!("Opus encoding failed: {}", e);
+                                continue;
+                            }
+                        }
+                    } else if let Some(pcm) = &stream.pcm_codec {
+                        match pcm.encode(&samples) {
+                            Ok(data) => data,
+                            Err(e) => {
+                                error!("PCM encoding failed: {}", e);
+                                continue;
+                            }
+                        }
+                    } else {
+                        error!("No codec available for encoding");
+                        break;
+                    };
+
+                    // Update stats
+                    stream.update_stats(encoded.len() as u64);
+
+                    drop(stream_lock);
+
+                    // Send packet with audio data
+                    if let Some(sender) = &packet_sender {
+                        if let Some(dev_id) = &device_id {
+                            let mut body = serde_json::Map::new();
+                            body.insert("data".to_string(),
+                                serde_json::Value::String(BASE64.encode(&encoded)));
+
+                            let packet = Packet::new(
+                                "cconnect.audiostream.data",
+                                serde_json::Value::Object(body),
+                            );
+
+                            if let Err(e) = sender.send((dev_id.clone(), packet)).await {
+                                error!("Failed to send audio packet: {}", e);
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+            debug!("Outgoing audio task ended");
+        });
+
+        Ok(())
+    }
+
+    #[cfg(feature = "audiostream")]
+    /// Start incoming audio decoding and playback task
+    async fn start_incoming_task(&mut self) -> Result<()> {
+        let incoming_stream = self.incoming_stream.clone();
+
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+                let mut stream_lock = incoming_stream.write().await;
+                if let Some(stream) = stream_lock.as_mut() {
+                    // Process buffered packets
+                    while let Some(encoded_data) = stream.buffer.pop_front() {
+                        // Decode based on codec
+                        let samples = if let Some(opus) = &mut stream.opus_codec {
+                            match opus.decode(&encoded_data) {
+                                Ok(data) => data,
+                                Err(e) => {
+                                    error!("Opus decoding failed: {}", e);
+                                    // Use packet loss concealment
+                                    match opus.decode_plc() {
+                                        Ok(plc) => plc,
+                                        Err(_) => continue,
+                                    }
+                                }
+                            }
+                        } else if let Some(pcm) = &stream.pcm_codec {
+                            match pcm.decode(&encoded_data) {
+                                Ok(data) => data,
+                                Err(e) => {
+                                    error!("PCM decoding failed: {}", e);
+                                    continue;
+                                }
+                            }
+                        } else {
+                            error!("No codec available for decoding");
+                            break;
+                        };
+
+                        // Send to playback
+                        if let Some(playback_tx) = &stream.playback_tx {
+                            if let Err(e) = playback_tx.send(samples).await {
+                                error!("Failed to send samples to playback: {}", e);
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    break;
+                }
+            }
+            debug!("Incoming audio task ended");
+        });
+
+        Ok(())
+    }
+
     /// Process audio data packet
-    #[allow(dead_code)]
     async fn process_audio_data(&self, data: &[u8]) -> Result<()> {
-        let mut stream_lock = self.incoming_stream.write().await;
-        if let Some(stream) = stream_lock.as_mut() {
-            stream.update_stats(data.len() as u64);
+        #[cfg(feature = "audiostream")]
+        {
+            let mut stream_lock = self.incoming_stream.write().await;
+            if let Some(stream) = stream_lock.as_mut() {
+                stream.update_stats(data.len() as u64);
 
-            // TODO: Decode audio data based on codec
-            // TODO: Write to audio playback buffer
-            // TODO: Handle buffer underrun/overrun
+                // Add to buffer for processing by incoming task
+                stream.buffer.push_back(data.to_vec());
 
-            debug!("Processed {} bytes of audio data", data.len());
-        } else {
-            warn!("Received audio data but no incoming stream is active");
+                debug!("Buffered {} bytes of audio data", data.len());
+            } else {
+                warn!("Received audio data but no incoming stream is active");
+            }
+        }
+
+        #[cfg(not(feature = "audiostream"))]
+        {
+            warn!("Cannot process audio data without 'audiostream' feature");
         }
 
         Ok(())
@@ -503,17 +794,25 @@ impl Plugin for AudioStreamPlugin {
     async fn init(
         &mut self,
         device: &Device,
-        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+        packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
     ) -> Result<()> {
         info!(
             "Initializing AudioStream plugin for device {}",
             device.name()
         );
         self.device_id = Some(device.id().to_string());
+        self.packet_sender = Some(packet_sender);
 
-        // TODO: Detect available audio backends
-        // TODO: Initialize PipeWire/PulseAudio connection
-        // TODO: Query available audio devices
+        #[cfg(feature = "audiostream")]
+        {
+            // PipeWire is initialized on-demand when stream starts
+            info!("Audio backend (PipeWire) will be initialized on stream start");
+        }
+
+        #[cfg(not(feature = "audiostream"))]
+        {
+            warn!("AudioStream plugin initialized without 'audiostream' feature - streaming disabled");
+        }
 
         Ok(())
     }
@@ -582,11 +881,17 @@ impl Plugin for AudioStreamPlugin {
             info!("Audio stream configuration updated");
         } else if packet.is_type("cconnect.audiostream.data") {
             // Process audio data packet
-            // TODO: Extract audio data from packet payload
-            // For now, just acknowledge receipt
-            if let Some(_payload) = packet.body.get("data").and_then(|v| v.as_str()) {
-                // TODO: Decode base64 payload
-                debug!("Received audio data packet (payload size unknown)");
+            if let Some(payload_b64) = packet.body.get("data").and_then(|v| v.as_str()) {
+                // Decode base64 payload
+                match BASE64.decode(payload_b64) {
+                    Ok(audio_data) => {
+                        debug!("Received audio data packet: {} bytes", audio_data.len());
+                        self.process_audio_data(&audio_data).await?;
+                    }
+                    Err(e) => {
+                        warn!("Failed to decode base64 audio data: {}", e);
+                    }
+                }
             } else {
                 warn!("Audio data packet has no payload");
             }
@@ -620,7 +925,7 @@ impl PluginFactory for AudioStreamPluginFactory {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "audiostream"))]
 mod tests {
     use super::*;
     use crate::test_utils::create_test_device;
@@ -657,6 +962,7 @@ mod tests {
 
         let config = StreamConfig {
             direction: StreamDirection::Output,
+            codec: AudioCodec::Pcm, // Use PCM which is always available
             ..Default::default()
         };
 
@@ -674,6 +980,7 @@ mod tests {
 
         let config = StreamConfig {
             direction: StreamDirection::Input,
+            codec: AudioCodec::Pcm, // Use PCM which is always available
             ..Default::default()
         };
 
@@ -691,6 +998,7 @@ mod tests {
 
         let config = StreamConfig {
             direction: StreamDirection::Output,
+            codec: AudioCodec::Pcm, // Use PCM which is always available
             sample_rate: 48000,
             ..Default::default()
         };
@@ -699,6 +1007,7 @@ mod tests {
 
         let new_config = StreamConfig {
             direction: StreamDirection::Output,
+            codec: AudioCodec::Pcm, // Use PCM which is always available
             sample_rate: 24000,
             ..Default::default()
         };
@@ -713,11 +1022,26 @@ mod tests {
     async fn test_codec_support() {
         let plugin = AudioStreamPlugin::new();
 
-        assert!(plugin.is_codec_supported(AudioCodec::Opus));
-        assert!(plugin.is_codec_supported(AudioCodec::Pcm));
-        assert!(plugin.is_codec_supported(AudioCodec::Aac));
+        // PCM should always be supported with audiostream feature
+        #[cfg(feature = "audiostream")]
+        {
+            assert!(plugin.is_codec_supported(AudioCodec::Pcm));
 
-        assert_eq!(plugin.supported_codecs().len(), 3);
+            #[cfg(feature = "opus")]
+            {
+                assert!(plugin.is_codec_supported(AudioCodec::Opus));
+                assert_eq!(plugin.supported_codecs().len(), 2);
+            }
+
+            #[cfg(not(feature = "opus"))]
+            {
+                assert!(!plugin.is_codec_supported(AudioCodec::Opus));
+                assert_eq!(plugin.supported_codecs().len(), 1);
+            }
+        }
+
+        // AAC is not implemented yet
+        assert!(!plugin.is_codec_supported(AudioCodec::Aac));
     }
 
     #[tokio::test]
@@ -727,6 +1051,7 @@ mod tests {
 
         let config = StreamConfig {
             direction: StreamDirection::Output,
+            codec: AudioCodec::Pcm, // Use PCM which is always available
             ..Default::default()
         };
 
@@ -758,7 +1083,10 @@ mod tests {
             .unwrap();
         plugin.start().await.unwrap();
 
-        let config = StreamConfig::default();
+        let config = StreamConfig {
+            codec: AudioCodec::Pcm, // Use PCM which is always available
+            ..Default::default()
+        };
         let body = serde_json::to_value(&config).unwrap();
 
         let packet = Packet::new("cconnect.audiostream.start", body);
@@ -781,6 +1109,7 @@ mod tests {
         // Start a stream first
         let config = StreamConfig {
             direction: StreamDirection::Output,
+            codec: AudioCodec::Pcm, // Use PCM which is always available
             ..Default::default()
         };
 

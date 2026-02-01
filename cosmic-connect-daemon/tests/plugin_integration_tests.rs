@@ -7,11 +7,9 @@ use anyhow::Result;
 use cosmic_connect_protocol::plugins::{
     battery, clipboard, mpris, notification, ping, share, Plugin, PluginFactory,
 };
-use cosmic_connect_protocol::{Device, DeviceInfo, DeviceType, Packet};
-use std::collections::HashMap;
+use cosmic_connect_protocol::{Device, DeviceInfo, DeviceType};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::timeout;
 
 /// Mock device for testing
 fn create_mock_device() -> Device {
@@ -147,7 +145,6 @@ async fn test_ping_packet_creation() {
 #[tokio::test]
 async fn test_plugin_trait_downcast() {
     use cosmic_connect_protocol::plugins::Plugin;
-    use std::any::Any;
 
     // Test that we can downcast from trait object
     let plugin: Box<dyn Plugin> = Box::new(battery::BatteryPlugin::new());
@@ -265,6 +262,9 @@ async fn test_clipboard_sync_between_devices() -> Result<()> {
     let (tx2, _rx2) = tokio::sync::mpsc::channel(100);
     plugin2.init(&device2, tx2).await?;
 
+    // Start plugin2 so it can process incoming packets
+    plugin2.start().await?;
+
     // Device 1 sends clipboard content
     let test_content = "Hello from device 1!";
     let packet = plugin1
@@ -349,14 +349,21 @@ async fn test_share_plugin_file() -> Result<()> {
         last_modified: None,
         open: false,
     };
-    let packet = plugin.create_file_packet(file_info, 0);
+    let packet = plugin.create_file_packet(file_info, 1739);
     assert_eq!(packet.packet_type, "cconnect.share.request");
 
     // Verify packet contains file metadata
     let body = packet.body;
     assert_eq!(body["filename"], filename);
-    assert!(body.get("numberOfFiles").is_some());
-    assert!(body.get("totalPayloadSize").is_some());
+
+    // For single file transfers, the payload info is in separate fields
+    assert_eq!(packet.payload_size, Some(filesize));
+    assert!(packet.payload_transfer_info.is_some());
+
+    // numberOfFiles and totalPayloadSize are only in multi-file update packets
+    // not in individual file share packets
+    let transfer_info = packet.payload_transfer_info.unwrap();
+    assert_eq!(transfer_info.get("port").unwrap(), &serde_json::json!(1739));
 
     Ok(())
 }
@@ -646,28 +653,36 @@ async fn test_share_plugin_capabilities() {
 #[tokio::test]
 async fn test_clipboard_timestamp_loop_prevention() -> Result<()> {
     // Test that clipboard plugin uses timestamps to prevent sync loops
+    // This is done via clipboard.connect packets, not standard clipboard packets
     let mut plugin = clipboard::ClipboardPlugin::new();
-    let mut device = create_mock_device();
+    let device = create_mock_device();
 
     let (tx, _rx) = tokio::sync::mpsc::channel(100);
     plugin.init(&device, tx).await?;
+    plugin.start().await?;
 
-    // First clipboard update
-    let content1 = "First content";
-    let packet1 = plugin.create_clipboard_packet(content1.to_string()).await;
+    // Set initial content
+    plugin.set_content("First content".to_string()).await;
+    let ts1 = plugin.get_timestamp().await;
 
-    // Verify timestamp is present
+    // Create connect packet - these include timestamps
+    let packet1 = plugin.create_connect_packet().await;
+    assert_eq!(packet1.packet_type, "cconnect.clipboard.connect");
     assert!(packet1.body.get("timestamp").is_some());
 
-    // Second update should have different timestamp
+    // Wait and create second update
     tokio::time::sleep(Duration::from_millis(10)).await;
-    let content2 = "Second content";
-    let packet2 = plugin.create_clipboard_packet(content2.to_string()).await;
+    plugin.set_content("Second content".to_string()).await;
+    let ts2 = plugin.get_timestamp().await;
+
+    // Create second connect packet
+    let packet2 = plugin.create_connect_packet().await;
 
     // Timestamps should differ (preventing loops)
-    let ts1 = packet1.body.get("timestamp").unwrap().as_i64().unwrap();
-    let ts2 = packet2.body.get("timestamp").unwrap().as_i64().unwrap();
     assert!(ts2 > ts1);
+    let packet_ts1 = packet1.body.get("timestamp").unwrap().as_i64().unwrap();
+    let packet_ts2 = packet2.body.get("timestamp").unwrap().as_i64().unwrap();
+    assert!(packet_ts2 > packet_ts1);
 
     Ok(())
 }
