@@ -42,7 +42,7 @@ impl Page {
     }
 }
 
-use dbus_client::{DbusClient, DeviceConfig, DeviceInfo};
+use dbus_client::{DbusClient, DaemonEvent, DeviceConfig, DeviceInfo};
 use std::collections::HashMap;
 
 const APP_ID: &str = "com.system76.CosmicConnectManager";
@@ -112,6 +112,32 @@ fn main() -> cosmic::iced::Result {
 }
 
 #[derive(Debug, Clone)]
+pub struct TransferInfo {
+    pub transfer_id: String,
+    pub device_id: String,
+    pub filename: String,
+    pub current: u64,
+    pub total: u64,
+    pub direction: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompletedTransfer {
+    pub filename: String,
+    pub size: u64,
+    pub timestamp: chrono::DateTime<chrono::Local>,
+    pub success: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct HistoryEvent {
+    pub icon_name: String,
+    pub event_type: String,
+    pub description: String,
+    pub timestamp: chrono::DateTime<chrono::Local>,
+}
+
+#[derive(Debug, Clone)]
 pub enum Message {
     NavigateTo(Page),
     SelectDevice(String),
@@ -127,6 +153,19 @@ pub enum Message {
     ToggleAutoStart(bool),
     ToggleNotifications(bool),
     TogglePlugin(String, bool),
+    DbusConnected(DbusClient),
+    DbusError(String),
+    DeviceAdded(String, DeviceInfo),
+    DeviceRemoved(String),
+    DeviceStateChanged(String, String),
+    MprisPlayersLoaded(Vec<String>),
+    MprisPlayerStateLoaded(String, dbus_client::PlayerState),
+    TransferProgressUpdate(TransferInfo),
+    TransferCompleted(String, String, String, bool, String),
+    AddHistoryEvent(HistoryEvent),
+    RefreshDevices,
+    RefreshMprisPlayers,
+    DaemonEventReceived(DaemonEvent),
     None,
 }
 
@@ -143,6 +182,11 @@ pub struct CosmicConnectManager {
     auto_start_enabled: bool,
     show_notifications: bool,
     plugin_states: HashMap<String, bool>,
+    mpris_players: Vec<(String, Option<dbus_client::PlayerState>)>,
+    active_transfers: HashMap<String, TransferInfo>,
+    completed_transfers: Vec<CompletedTransfer>,
+    history_events: Vec<HistoryEvent>,
+    event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<DaemonEvent>>,
 }
 
 impl CosmicConnectManager {
@@ -302,12 +346,7 @@ impl CosmicConnectManager {
 
         sections = sections.push(text("Media Players").size(18));
 
-        let placeholder_players = vec![
-            ("firefox", "Firefox"),
-            ("spotify", "Spotify"),
-        ];
-
-        if placeholder_players.is_empty() {
+        if self.mpris_players.is_empty() {
             sections = sections.push(
                 container(
                     column::with_capacity(3)
@@ -321,14 +360,81 @@ impl CosmicConnectManager {
                 .center_y(Length::Fill)
             );
         } else {
-            for (player_id, player_name) in placeholder_players {
-                sections = sections.push(self.media_player_card(player_id, player_name));
+            for (player_id, state) in &self.mpris_players {
+                sections = sections.push(self.media_player_card_with_state(player_id, state.as_ref()));
             }
         }
 
         container(sections)
             .width(Length::Fill)
             .height(Length::Fill)
+            .into()
+    }
+
+    fn media_player_card_with_state(&self, player_id: &str, state: Option<&dbus_client::PlayerState>) -> Element<Message> {
+        let player_icon = icon::from_name("multimedia-player-symbolic").size(48);
+
+        let (player_name, track_info_text, play_pause_icon) = if let Some(state) = state {
+            let track = if let Some(title) = &state.metadata.title {
+                if let Some(artist) = &state.metadata.artist {
+                    format!("{} - {}", artist, title)
+                } else {
+                    title.clone()
+                }
+            } else {
+                "No track playing".to_string()
+            };
+
+            let icon_name = match state.playback_status {
+                dbus_client::PlaybackStatus::Playing => "media-playback-pause-symbolic",
+                _ => "media-playback-start-symbolic",
+            };
+
+            (state.identity.clone(), track, icon_name)
+        } else {
+            (player_id.to_string(), "Loading...".to_string(), "media-playback-start-symbolic")
+        };
+
+        let name_text = text(player_name).size(16);
+        let track_info = text(track_info_text).size(12);
+
+        let info_column = column::with_capacity(2)
+            .spacing(theme::active().cosmic().space_xxs())
+            .push(name_text)
+            .push(track_info);
+
+        let header_row = row::with_capacity(2)
+            .spacing(theme::active().cosmic().space_s())
+            .align_y(Alignment::Center)
+            .push(player_icon)
+            .push(info_column);
+
+        let prev_button = button::icon(icon::from_name("media-skip-backward-symbolic").size(16))
+            .on_press(Message::MediaPrevious(player_id.to_string()))
+            .padding(theme::active().cosmic().space_xxs());
+
+        let play_pause_button = button::icon(icon::from_name(play_pause_icon).size(16))
+            .on_press(Message::MediaPlayPause(player_id.to_string()))
+            .padding(theme::active().cosmic().space_xxs());
+
+        let next_button = button::icon(icon::from_name("media-skip-forward-symbolic").size(16))
+            .on_press(Message::MediaNext(player_id.to_string()))
+            .padding(theme::active().cosmic().space_xxs());
+
+        let controls_row = row::with_capacity(3)
+            .spacing(theme::active().cosmic().space_xs())
+            .push(prev_button)
+            .push(play_pause_button)
+            .push(next_button);
+
+        let card_content = column::with_capacity(2)
+            .spacing(theme::active().cosmic().space_s())
+            .push(header_row)
+            .push(controls_row);
+
+        container(card_content)
+            .padding(theme::active().cosmic().space_s())
+            .width(Length::Fill)
             .into()
     }
 
@@ -382,40 +488,78 @@ impl CosmicConnectManager {
             .spacing(theme::active().cosmic().space_m())
             .padding(theme::active().cosmic().space_m());
 
-        content = content.push(text("Active Transfers (2)").size(16));
+        let active_count = self.active_transfers.len();
+        content = content.push(text(format!("Active Transfers ({})", active_count)).size(16));
 
-        let active_transfer_1 = self.transfer_card(
-            "transfer_1",
-            "document.pdf",
-            "text-x-generic-symbolic",
-            65,
-            "2.3 MB/s",
-            true,
-        );
-        content = content.push(active_transfer_1);
+        if !self.active_transfers.is_empty() {
+            for (transfer_id, info) in &self.active_transfers {
+                let progress = if info.total > 0 {
+                    ((info.current as f64 / info.total as f64) * 100.0) as u8
+                } else {
+                    0
+                };
 
-        let active_transfer_2 = self.transfer_card(
-            "transfer_2",
-            "photo.jpg",
-            "image-x-generic-symbolic",
-            35,
-            "1.1 MB/s",
-            true,
-        );
-        content = content.push(active_transfer_2);
+                let speed = if info.current > 0 {
+                    format!("{:.1} MB/s", info.current as f64 / 1_000_000.0)
+                } else {
+                    "Calculating...".to_string()
+                };
 
-        content = content.push(vertical_space().height(theme::active().cosmic().space_m()));
-        content = content.push(text("Completed Today (5)").size(16));
+                let icon_name = if info.filename.ends_with(".pdf") || info.filename.ends_with(".txt") {
+                    "text-x-generic-symbolic"
+                } else if info.filename.ends_with(".jpg") || info.filename.ends_with(".png") {
+                    "image-x-generic-symbolic"
+                } else {
+                    "text-x-generic-symbolic"
+                };
 
-        let completed_items = column::with_capacity(5)
-            .spacing(theme::active().cosmic().space_xs())
-            .push(self.completed_transfer_item("report.docx", "text-x-generic-symbolic", "2.1 MB", "10:32 AM"))
-            .push(self.completed_transfer_item("vacation.jpg", "image-x-generic-symbolic", "4.5 MB", "09:15 AM"))
-            .push(self.completed_transfer_item("presentation.pptx", "x-office-presentation-symbolic", "8.2 MB", "08:45 AM"))
-            .push(self.completed_transfer_item("video.mp4", "video-x-generic-symbolic", "125 MB", "08:12 AM"))
-            .push(self.completed_transfer_item("archive.zip", "package-x-generic-symbolic", "15.3 MB", "07:55 AM"));
+                content = content.push(self.transfer_card(
+                    transfer_id,
+                    &info.filename,
+                    icon_name,
+                    progress,
+                    &speed,
+                    true,
+                ));
+            }
+        } else {
+            content = content.push(text("No active transfers").size(14));
+        }
 
-        content = content.push(completed_items);
+        if !self.completed_transfers.is_empty() {
+            content = content.push(vertical_space().height(theme::active().cosmic().space_m()));
+            content = content.push(text(format!("Completed ({})", self.completed_transfers.len())).size(16));
+
+            let mut completed_col = column::with_capacity(self.completed_transfers.len())
+                .spacing(theme::active().cosmic().space_xs());
+
+            for transfer in &self.completed_transfers {
+                let icon_name = if transfer.filename.ends_with(".pdf") || transfer.filename.ends_with(".txt") {
+                    "text-x-generic-symbolic"
+                } else if transfer.filename.ends_with(".jpg") || transfer.filename.ends_with(".png") {
+                    "image-x-generic-symbolic"
+                } else {
+                    "text-x-generic-symbolic"
+                };
+
+                let size_str = if transfer.size > 0 {
+                    format!("{:.1} MB", transfer.size as f64 / 1_000_000.0)
+                } else {
+                    "Unknown".to_string()
+                };
+
+                let time_str = transfer.timestamp.format("%H:%M").to_string();
+
+                completed_col = completed_col.push(self.completed_transfer_item(
+                    &transfer.filename,
+                    icon_name,
+                    &size_str,
+                    &time_str,
+                ));
+            }
+
+            content = content.push(completed_col);
+        }
 
         container(content)
             .width(Length::Fill)
@@ -518,46 +662,7 @@ impl CosmicConnectManager {
 
         content = content.push(header);
 
-        let placeholder_events = vec![
-            (
-                "network-wireless-signal-excellent-symbolic",
-                "Device connected",
-                "Pixel 7 Pro",
-                "2 minutes ago"
-            ),
-            (
-                "document-save-symbolic",
-                "File received",
-                "photo.jpg from Pixel 7 Pro",
-                "15 minutes ago"
-            ),
-            (
-                "notification-symbolic",
-                "Notification",
-                "New message from WhatsApp",
-                "1 hour ago"
-            ),
-            (
-                "network-transmit-receive-symbolic",
-                "Ping sent",
-                "Galaxy Tab S9",
-                "3 hours ago"
-            ),
-            (
-                "network-wireless-offline-symbolic",
-                "Device disconnected",
-                "Pixel 7 Pro",
-                "5 hours ago"
-            ),
-            (
-                "document-send-symbolic",
-                "File sent",
-                "report.pdf to Galaxy Tab S9",
-                "Yesterday"
-            ),
-        ];
-
-        if placeholder_events.is_empty() {
+        if self.history_events.is_empty() {
             content = content.push(
                 container(
                     column::with_capacity(3)
@@ -571,16 +676,30 @@ impl CosmicConnectManager {
                 .center_y(Length::Fill)
             );
         } else {
-            let events_list = column::with_capacity(placeholder_events.len())
+            let mut events_list = column::with_capacity(self.history_events.len())
                 .spacing(theme::active().cosmic().space_xs());
 
-            let mut events_list = events_list;
-            for (icon_name, event_type, description, timestamp) in placeholder_events {
+            for event in &self.history_events {
+                let timestamp_str = {
+                    let now = chrono::Local::now();
+                    let diff = now.signed_duration_since(event.timestamp);
+
+                    if diff.num_minutes() < 1 {
+                        "Just now".to_string()
+                    } else if diff.num_minutes() < 60 {
+                        format!("{} minutes ago", diff.num_minutes())
+                    } else if diff.num_hours() < 24 {
+                        format!("{} hours ago", diff.num_hours())
+                    } else {
+                        event.timestamp.format("%b %d, %H:%M").to_string()
+                    }
+                };
+
                 events_list = events_list.push(self.history_event_item(
-                    icon_name,
-                    event_type,
-                    description,
-                    timestamp,
+                    &event.icon_name,
+                    &event.event_type,
+                    &event.description,
+                    &timestamp_str,
                 ));
             }
 
@@ -819,6 +938,23 @@ impl Application for CosmicConnectManager {
         plugin_states.insert("remotedesktop".to_string(), false);
         plugin_states.insert("camera".to_string(), false);
 
+        let connect_task = cosmic::task::future(async move {
+            match DbusClient::connect().await {
+                Ok((client, _event_rx)) => {
+                    if let Err(e) = client.start_signal_listener().await {
+                        tracing::warn!("Failed to start signal listener: {}", e);
+                        return Message::DbusError(format!("Failed to start signal listener: {}", e));
+                    }
+
+                    Message::DbusConnected(client)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to connect to DBus: {}", e);
+                    Message::DbusError(format!("Failed to connect to daemon: {}", e))
+                }
+            }
+        });
+
         (
             CosmicConnectManager {
                 core,
@@ -833,9 +969,18 @@ impl Application for CosmicConnectManager {
                 auto_start_enabled: true,
                 show_notifications: true,
                 plugin_states,
+                mpris_players: Vec::new(),
+                active_transfers: HashMap::new(),
+                completed_transfers: Vec::new(),
+                history_events: Vec::new(),
+                event_rx: None,
             },
-            Task::none(),
+            connect_task,
         )
+    }
+
+    fn subscription(&self) -> cosmic::iced::Subscription<Self::Message> {
+        cosmic::iced::Subscription::none()
     }
 
     fn header_start(&self) -> Vec<Element<Self::Message>> {
@@ -874,17 +1019,241 @@ impl Application for CosmicConnectManager {
                 self.device_configs.insert(device_id, config);
                 Task::none()
             }
-            Message::ExecuteAction(_device_id, _action) => Task::none(),
-            Message::DbusReady(client) => {
+            Message::DbusConnected(client) => {
                 self.dbus_client = Some(client);
                 self.dbus_ready = true;
+
+                Task::batch(vec![
+                    cosmic::task::future(async { Message::RefreshDevices }),
+                    cosmic::task::future(async { Message::RefreshMprisPlayers }),
+                ])
+            }
+            Message::DbusError(err) => {
+                tracing::error!("DBus error: {}", err);
+                self.dbus_ready = false;
                 Task::none()
             }
-            Message::MediaPlayPause(_device_id) => Task::none(),
-            Message::MediaNext(_device_id) => Task::none(),
-            Message::MediaPrevious(_device_id) => Task::none(),
-            Message::CancelTransfer(_transfer_id) => Task::none(),
-            Message::ClearHistory => Task::none(),
+            Message::RefreshDevices => {
+                if let Some(client) = &self.dbus_client {
+                    let client = client.clone();
+                    cosmic::task::future(async move {
+                        match client.list_devices().await {
+                            Ok(devices) => Message::DevicesUpdated(devices),
+                            Err(e) => {
+                                tracing::warn!("Failed to list devices: {}", e);
+                                Message::None
+                            }
+                        }
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            Message::RefreshMprisPlayers => {
+                if let Some(client) = &self.dbus_client {
+                    let client = client.clone();
+                    cosmic::task::future(async move {
+                        match client.get_mpris_players().await {
+                            Ok(players) => Message::MprisPlayersLoaded(players),
+                            Err(e) => {
+                                tracing::warn!("Failed to get MPRIS players: {}", e);
+                                Message::None
+                            }
+                        }
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            Message::MprisPlayersLoaded(players) => {
+                let client = self.dbus_client.clone();
+                let tasks: Vec<_> = players.iter().map(|player| {
+                    let player_clone = player.clone();
+                    let client_clone = client.clone();
+                    cosmic::task::future(async move {
+                        if let Some(client) = client_clone {
+                            match client.get_player_state(&player_clone).await {
+                                Ok(state) => Message::MprisPlayerStateLoaded(player_clone, state),
+                                Err(_) => Message::MprisPlayerStateLoaded(player_clone.clone(), dbus_client::PlayerState {
+                                    name: player_clone.clone(),
+                                    identity: player_clone,
+                                    playback_status: dbus_client::PlaybackStatus::Stopped,
+                                    position: 0,
+                                    volume: 0.0,
+                                    loop_status: dbus_client::LoopStatus::None,
+                                    shuffle: false,
+                                    can_play: false,
+                                    can_pause: false,
+                                    can_go_next: false,
+                                    can_go_previous: false,
+                                    can_seek: false,
+                                    metadata: dbus_client::PlayerMetadata::default(),
+                                }),
+                            }
+                        } else {
+                            Message::None
+                        }
+                    })
+                }).collect();
+
+                self.mpris_players = players.into_iter().map(|p| (p, None)).collect();
+                Task::batch(tasks)
+            }
+            Message::MprisPlayerStateLoaded(player, state) => {
+                if let Some(entry) = self.mpris_players.iter_mut().find(|(p, _)| p == &player) {
+                    entry.1 = Some(state);
+                }
+                Task::none()
+            }
+            Message::ExecuteAction(device_id, action) => {
+                if let Some(client) = &self.dbus_client {
+                    let client = client.clone();
+                    match action {
+                        DeviceAction::Ping => {
+                            cosmic::task::future(async move {
+                                if let Err(e) = client.send_ping(&device_id, "Ping from manager").await {
+                                    tracing::error!("Failed to send ping: {}", e);
+                                }
+                                Message::None
+                            })
+                        }
+                        DeviceAction::Find => {
+                            cosmic::task::future(async move {
+                                if let Err(e) = client.find_phone(&device_id).await {
+                                    tracing::error!("Failed to find phone: {}", e);
+                                }
+                                Message::None
+                            })
+                        }
+                        DeviceAction::SendFile => {
+                            Task::none()
+                        }
+                        _ => Task::none(),
+                    }
+                } else {
+                    Task::none()
+                }
+            }
+            Message::MediaPlayPause(player) => {
+                if let Some(client) = &self.dbus_client {
+                    let client = client.clone();
+                    cosmic::task::future(async move {
+                        if let Err(e) = client.mpris_control(&player, "PlayPause").await {
+                            tracing::error!("Failed to control media player: {}", e);
+                        }
+                        Message::None
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            Message::MediaNext(player) => {
+                if let Some(client) = &self.dbus_client {
+                    let client = client.clone();
+                    cosmic::task::future(async move {
+                        if let Err(e) = client.mpris_control(&player, "Next").await {
+                            tracing::error!("Failed to control media player: {}", e);
+                        }
+                        Message::None
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            Message::MediaPrevious(player) => {
+                if let Some(client) = &self.dbus_client {
+                    let client = client.clone();
+                    cosmic::task::future(async move {
+                        if let Err(e) = client.mpris_control(&player, "Previous").await {
+                            tracing::error!("Failed to control media player: {}", e);
+                        }
+                        Message::None
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            Message::CancelTransfer(transfer_id) => {
+                if let Some(client) = &self.dbus_client {
+                    let client = client.clone();
+                    cosmic::task::future(async move {
+                        if let Err(e) = client.cancel_transfer(&transfer_id).await {
+                            tracing::error!("Failed to cancel transfer: {}", e);
+                        }
+                        Message::None
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            Message::TransferProgressUpdate(info) => {
+                self.active_transfers.insert(info.transfer_id.clone(), info);
+                Task::none()
+            }
+            Message::TransferCompleted(transfer_id, _device_id, filename, success, _error) => {
+                self.active_transfers.remove(&transfer_id);
+
+                let completed = CompletedTransfer {
+                    filename: filename.clone(),
+                    size: 0,
+                    timestamp: chrono::Local::now(),
+                    success,
+                };
+                self.completed_transfers.push(completed);
+
+                let event = HistoryEvent {
+                    icon_name: if success { "document-save-symbolic".to_string() } else { "dialog-error-symbolic".to_string() },
+                    event_type: if success { "File received".to_string() } else { "Transfer failed".to_string() },
+                    description: filename,
+                    timestamp: chrono::Local::now(),
+                };
+                self.history_events.push(event);
+
+                Task::none()
+            }
+            Message::DeviceAdded(device_id, device_info) => {
+                self.devices.insert(device_id.clone(), device_info.clone());
+
+                let event = HistoryEvent {
+                    icon_name: "network-wireless-signal-excellent-symbolic".to_string(),
+                    event_type: "Device discovered".to_string(),
+                    description: device_info.name,
+                    timestamp: chrono::Local::now(),
+                };
+                self.history_events.push(event);
+
+                Task::none()
+            }
+            Message::DeviceRemoved(device_id) => {
+                if let Some(device) = self.devices.remove(&device_id) {
+                    let event = HistoryEvent {
+                        icon_name: "network-wireless-offline-symbolic".to_string(),
+                        event_type: "Device disconnected".to_string(),
+                        description: device.name,
+                        timestamp: chrono::Local::now(),
+                    };
+                    self.history_events.push(event);
+                }
+                Task::none()
+            }
+            Message::DeviceStateChanged(device_id, state) => {
+                if let Some(device) = self.devices.get_mut(&device_id) {
+                    match state.as_str() {
+                        "connected" => device.is_connected = true,
+                        "disconnected" => device.is_connected = false,
+                        _ => {}
+                    }
+                }
+                Task::none()
+            }
+            Message::AddHistoryEvent(event) => {
+                self.history_events.push(event);
+                Task::none()
+            }
+            Message::ClearHistory => {
+                self.history_events.clear();
+                Task::none()
+            }
             Message::ToggleAutoStart(enabled) => {
                 self.auto_start_enabled = enabled;
                 Task::none()
@@ -895,6 +1264,39 @@ impl Application for CosmicConnectManager {
             }
             Message::TogglePlugin(plugin_id, enabled) => {
                 self.plugin_states.insert(plugin_id, enabled);
+                Task::none()
+            }
+            Message::DaemonEventReceived(event) => {
+                match event {
+                    DaemonEvent::DeviceAdded { device_id, device_info } => {
+                        cosmic::task::future(async move { Message::DeviceAdded(device_id, device_info) })
+                    }
+                    DaemonEvent::DeviceRemoved { device_id } => {
+                        cosmic::task::future(async move { Message::DeviceRemoved(device_id) })
+                    }
+                    DaemonEvent::DeviceStateChanged { device_id, state } => {
+                        cosmic::task::future(async move { Message::DeviceStateChanged(device_id, state) })
+                    }
+                    DaemonEvent::TransferProgress { transfer_id, device_id, filename, current, total, direction } => {
+                        let info = TransferInfo {
+                            transfer_id,
+                            device_id,
+                            filename,
+                            current,
+                            total,
+                            direction,
+                        };
+                        cosmic::task::future(async move { Message::TransferProgressUpdate(info) })
+                    }
+                    DaemonEvent::TransferComplete { transfer_id, device_id, filename, success, error } => {
+                        cosmic::task::future(async move { Message::TransferCompleted(transfer_id, device_id, filename, success, error) })
+                    }
+                    _ => Task::none(),
+                }
+            }
+            Message::DbusReady(client) => {
+                self.dbus_client = Some(client);
+                self.dbus_ready = true;
                 Task::none()
             }
             Message::None => Task::none(),

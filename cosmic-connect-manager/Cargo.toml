@@ -23,6 +23,7 @@ arboard = "3.4"
 dirs = "5.0"
 toml = "0.8"
 clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
 
 [[bin]]
 name = "cosmic-connect-manager"
