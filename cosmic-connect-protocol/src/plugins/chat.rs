@@ -326,6 +326,9 @@ pub struct ChatPlugin {
 
     /// Whether remote user is currently typing
     remote_typing: Arc<RwLock<bool>>,
+
+    /// Packet sender for response packets
+    packet_sender: Option<tokio::sync::mpsc::Sender<(String, Packet)>>,
 }
 
 impl ChatPlugin {
@@ -346,6 +349,7 @@ impl ChatPlugin {
             enabled: false,
             memory_storage: Arc::new(RwLock::new(ChatStorage::new(config.clone()))),
             sqlite_storage: None,
+            packet_sender: None,
             config,
             remote_typing: Arc::new(RwLock::new(false)),
         }
@@ -580,7 +584,8 @@ impl ChatPlugin {
         self.add_message(message);
 
         // TODO: Send notification if enabled
-        // Need notification plugin integration
+        // This would require notification plugin integration, which should be
+        // handled by the daemon/manager layer, not within this plugin
 
         Ok(())
     }
@@ -650,8 +655,15 @@ impl ChatPlugin {
 
         info!("Found {} messages", messages.len());
 
-        // TODO: Send history response packet
-        // Need packet sending infrastructure
+        // Send history response packet
+        let response = self.create_history_response_packet(messages);
+        if let (Some(device_id), Some(sender)) = (&self.device_id, &self.packet_sender) {
+            if let Err(e) = sender.send((device_id.clone(), response)).await {
+                warn!("Failed to send chat history response packet: {}", e);
+            }
+        } else {
+            warn!("Cannot send chat history - plugin not properly initialized");
+        }
 
         Ok(())
     }
@@ -701,10 +713,11 @@ impl Plugin for ChatPlugin {
     async fn init(
         &mut self,
         device: &Device,
-        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+        packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
     ) -> Result<()> {
         let device_id = device.id().to_string();
         self.device_id = Some(device_id.clone());
+        self.packet_sender = Some(packet_sender);
 
         // Initialize SQLite storage
         self.init_sqlite_storage(&device_id);

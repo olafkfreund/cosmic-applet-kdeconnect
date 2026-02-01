@@ -99,6 +99,9 @@ pub struct LockPlugin {
 
     /// Logind DBus backend for screen lock control
     logind_backend: LogindBackend,
+
+    /// Packet sender for response packets
+    packet_sender: Option<tokio::sync::mpsc::Sender<(String, Packet)>>,
 }
 
 impl LockPlugin {
@@ -109,6 +112,7 @@ impl LockPlugin {
             enabled: false,
             lock_state: Arc::new(RwLock::new(false)),
             logind_backend: LogindBackend::new(),
+            packet_sender: None,
         }
     }
 
@@ -278,9 +282,16 @@ impl LockPlugin {
         match result {
             Ok(()) => {
                 self.set_lock_state(set_locked);
-                // TODO: Send state update back to device
-                // let state_packet = self.create_lock_state(set_locked);
-                // device.send_packet(&state_packet).await?;
+
+                // Send state update back to device
+                let state_packet = self.create_lock_state(set_locked);
+                if let (Some(device_id), Some(sender)) = (&self.device_id, &self.packet_sender) {
+                    if let Err(e) = sender.send((device_id.clone(), state_packet)).await {
+                        warn!("Failed to send lock state packet: {}", e);
+                    }
+                } else {
+                    warn!("Cannot send lock state - plugin not properly initialized");
+                }
             }
             Err(e) => {
                 warn!("Failed to {} desktop: {}", action, e);
@@ -301,9 +312,16 @@ impl LockPlugin {
         match self.query_lock_state().await {
             Ok(locked) => {
                 self.set_lock_state(locked);
-                // TODO: Send state update back to device
-                // let state_packet = self.create_lock_state(locked);
-                // device.send_packet(&state_packet).await?;
+
+                // Send state update back to device
+                let state_packet = self.create_lock_state(locked);
+                if let (Some(device_id), Some(sender)) = (&self.device_id, &self.packet_sender) {
+                    if let Err(e) = sender.send((device_id.clone(), state_packet)).await {
+                        warn!("Failed to send lock state packet: {}", e);
+                    }
+                } else {
+                    warn!("Cannot send lock state - plugin not properly initialized");
+                }
             }
             Err(e) => {
                 warn!("Failed to query lock state: {}", e);
@@ -391,9 +409,10 @@ impl Plugin for LockPlugin {
     async fn init(
         &mut self,
         device: &Device,
-        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+        packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
     ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
+        self.packet_sender = Some(packet_sender);
         info!("Lock plugin initialized for device {}", device.name());
         Ok(())
     }

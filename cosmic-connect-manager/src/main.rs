@@ -372,6 +372,14 @@ pub enum Message {
     SaveDeviceSettings,
     DeviceNicknameChanged(String),
     DevicePluginToggled(String, bool),
+    // Remote input dialog messages
+    OpenRemoteInputDialog(String),
+    CloseRemoteInputDialog,
+    SendRemoteInput(String, f32, f32, String), // device_id, x, y, action
+    // Power options dialog messages
+    OpenPowerDialog(String),
+    ClosePowerDialog,
+    ExecutePowerAction(String, String), // device_id, action
     // File picker
     FileSelected(String, String),
     None,
@@ -415,6 +423,12 @@ pub struct CosmicConnectManager {
     device_settings_config: Option<DeviceConfig>,
     device_settings_nickname: String,
     device_settings_plugins: HashMap<String, bool>,
+    // Remote input dialog state
+    show_remote_input_dialog: bool,
+    remote_input_device_id: Option<String>,
+    // Power dialog state
+    show_power_dialog: bool,
+    power_device_id: Option<String>,
 }
 
 impl CosmicConnectManager {
@@ -1437,6 +1451,191 @@ impl CosmicConnectManager {
             .class(theme::Container::Dialog)
             .into()
     }
+
+    fn remote_input_dialog_view(&self) -> Element<'_, Message> {
+        let mut content = column::with_capacity(6)
+            .spacing(theme::active().cosmic().space_m())
+            .padding(theme::active().cosmic().space_m())
+            .push(text("Remote Input Control").size(18))
+            .push(text("Control mouse and keyboard on the remote device").size(12));
+
+        // Mouse control section
+        content = content.push(text("Mouse Control").size(14));
+
+        let mouse_controls = row::with_capacity(3)
+            .spacing(theme::active().cosmic().space_s())
+            .push(
+                button::text("Click")
+                    .on_press(Message::SendRemoteInput(
+                        self.remote_input_device_id.clone().unwrap_or_default(),
+                        0.5,
+                        0.5,
+                        "click".to_string(),
+                    ))
+                    .class(theme::Button::Standard)
+                    .padding(theme::active().cosmic().space_s()),
+            )
+            .push(
+                button::text("Right Click")
+                    .on_press(Message::SendRemoteInput(
+                        self.remote_input_device_id.clone().unwrap_or_default(),
+                        0.5,
+                        0.5,
+                        "right_click".to_string(),
+                    ))
+                    .class(theme::Button::Standard)
+                    .padding(theme::active().cosmic().space_s()),
+            )
+            .push(
+                button::text("Double Click")
+                    .on_press(Message::SendRemoteInput(
+                        self.remote_input_device_id.clone().unwrap_or_default(),
+                        0.5,
+                        0.5,
+                        "double_click".to_string(),
+                    ))
+                    .class(theme::Button::Standard)
+                    .padding(theme::active().cosmic().space_s()),
+            );
+
+        content = content.push(mouse_controls);
+
+        // Arrow keys control
+        content = content.push(text("Arrow Keys").size(14));
+
+        let arrow_controls = column::with_capacity(2)
+            .spacing(theme::active().cosmic().space_xxs())
+            .push(
+                row::with_capacity(1)
+                    .push(
+                        button::icon(icon::from_name("go-up-symbolic"))
+                            .on_press(Message::SendRemoteInput(
+                                self.remote_input_device_id.clone().unwrap_or_default(),
+                                0.0,
+                                0.0,
+                                "key_up".to_string(),
+                            ))
+                            .class(theme::Button::Standard)
+                            .padding(theme::active().cosmic().space_s()),
+                    )
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
+            )
+            .push(
+                row::with_capacity(3)
+                    .spacing(theme::active().cosmic().space_xxs())
+                    .push(
+                        button::icon(icon::from_name("go-previous-symbolic"))
+                            .on_press(Message::SendRemoteInput(
+                                self.remote_input_device_id.clone().unwrap_or_default(),
+                                0.0,
+                                0.0,
+                                "key_left".to_string(),
+                            ))
+                            .class(theme::Button::Standard)
+                            .padding(theme::active().cosmic().space_s()),
+                    )
+                    .push(
+                        button::icon(icon::from_name("go-down-symbolic"))
+                            .on_press(Message::SendRemoteInput(
+                                self.remote_input_device_id.clone().unwrap_or_default(),
+                                0.0,
+                                0.0,
+                                "key_down".to_string(),
+                            ))
+                            .class(theme::Button::Standard)
+                            .padding(theme::active().cosmic().space_s()),
+                    )
+                    .push(
+                        button::icon(icon::from_name("go-next-symbolic"))
+                            .on_press(Message::SendRemoteInput(
+                                self.remote_input_device_id.clone().unwrap_or_default(),
+                                0.0,
+                                0.0,
+                                "key_right".to_string(),
+                            ))
+                            .class(theme::Button::Standard)
+                            .padding(theme::active().cosmic().space_s()),
+                    )
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
+            );
+
+        content = content.push(arrow_controls);
+
+        // Close button
+        content = content.push(
+            button::text("Close")
+                .on_press(Message::CloseRemoteInputDialog)
+                .class(theme::Button::Text)
+                .padding(theme::active().cosmic().space_s()),
+        );
+
+        container(content)
+            .padding(theme::active().cosmic().space_m())
+            .width(Length::Fixed(400.0))
+            .class(theme::Container::Dialog)
+            .into()
+    }
+
+    fn power_dialog_view(&self) -> Element<'_, Message> {
+        let device_id = self.power_device_id.clone().unwrap_or_default();
+
+        let mut content = column::with_capacity(6)
+            .spacing(theme::active().cosmic().space_m())
+            .padding(theme::active().cosmic().space_m())
+            .push(text("Power Options").size(18))
+            .push(text("Choose a power action for the remote device").size(12));
+
+        // Power action buttons
+        let power_actions = [
+            ("suspend", "Suspend", "Sleep mode, quick resume", "media-playback-pause-symbolic"),
+            ("hibernate", "Hibernate", "Save to disk, slower resume", "document-save-symbolic"),
+            ("shutdown", "Shutdown", "Power off completely", "system-shutdown-symbolic"),
+            ("restart", "Restart", "Reboot the device", "system-reboot-symbolic"),
+        ];
+
+        for (action, title, description, icon_name) in power_actions {
+            let action_button = button::custom(
+                container(
+                    row::with_capacity(2)
+                        .spacing(theme::active().cosmic().space_s())
+                        .align_y(Alignment::Center)
+                        .push(icon::from_name(icon_name).size(24))
+                        .push(
+                            column::with_capacity(2)
+                                .spacing(theme::active().cosmic().space_xxs())
+                                .push(text(title).size(14))
+                                .push(text(description).size(12)),
+                        ),
+                )
+                .padding(theme::active().cosmic().space_s())
+                .width(Length::Fill),
+            )
+            .on_press(Message::ExecutePowerAction(
+                device_id.clone(),
+                action.to_string(),
+            ))
+            .class(theme::Button::Standard)
+            .width(Length::Fill);
+
+            content = content.push(action_button);
+        }
+
+        // Close button
+        content = content.push(
+            button::text("Cancel")
+                .on_press(Message::ClosePowerDialog)
+                .class(theme::Button::Text)
+                .padding(theme::active().cosmic().space_s()),
+        );
+
+        container(content)
+            .padding(theme::active().cosmic().space_m())
+            .width(Length::Fixed(450.0))
+            .class(theme::Container::Dialog)
+            .into()
+    }
 }
 
 impl Application for CosmicConnectManager {
@@ -1528,6 +1727,12 @@ impl Application for CosmicConnectManager {
                 device_settings_config: None,
                 device_settings_nickname: String::new(),
                 device_settings_plugins: HashMap::new(),
+                // Remote input dialog
+                show_remote_input_dialog: false,
+                remote_input_device_id: None,
+                // Power dialog
+                show_power_dialog: false,
+                power_device_id: None,
             },
             connect_task,
         )
@@ -1571,6 +1776,20 @@ impl Application for CosmicConnectManager {
                 .into()
         } else if self.show_device_settings {
             container(self.settings_dialog_view())
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        } else if self.show_remote_input_dialog {
+            container(self.remote_input_dialog_view())
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into()
+        } else if self.show_power_dialog {
+            container(self.power_dialog_view())
                 .center_x(Length::Fill)
                 .center_y(Length::Fill)
                 .width(Length::Fill)
@@ -1773,8 +1992,9 @@ impl Application for CosmicConnectManager {
                             Task::none()
                         }
                         DeviceAction::RemoteInput => {
-                            // TODO: Open remote input dialog/window
-                            tracing::info!("Remote input requested for {}", device_id);
+                            // Open remote input dialog
+                            self.show_remote_input_dialog = true;
+                            self.remote_input_device_id = Some(device_id.clone());
                             Task::none()
                         }
                         DeviceAction::Screenshot => cosmic::task::future(async move {
@@ -1907,13 +2127,10 @@ impl Application for CosmicConnectManager {
                             Message::None
                         }),
                         DeviceAction::Power => {
-                            // TODO: Show power options menu (shutdown, suspend, hibernate)
-                            cosmic::task::future(async move {
-                                if let Err(e) = client.power_action(&device_id, "suspend").await {
-                                    tracing::error!("Failed to send power action: {}", e);
-                                }
-                                Message::None
-                            })
+                            // Open power options dialog
+                            self.show_power_dialog = true;
+                            self.power_device_id = Some(device_id.clone());
+                            Task::none()
                         }
                         DeviceAction::Wake => cosmic::task::future(async move {
                             if let Err(e) = client.wake_device(&device_id).await {
@@ -1922,9 +2139,24 @@ impl Application for CosmicConnectManager {
                             Message::None
                         }),
                         DeviceAction::RunCommand => {
-                            // TODO: Open run command dialog
-                            tracing::info!("Run command requested for {}", device_id);
-                            Task::none()
+                            // Open run command dialog and load available commands
+                            self.show_runcommand_dialog = true;
+                            self.runcommand_device_id = Some(device_id.clone());
+                            if let Some(client) = &self.dbus_client {
+                                let client = client.clone();
+                                let device_id_clone = device_id.clone();
+                                cosmic::task::future(async move {
+                                    match client.get_run_commands(device_id).await {
+                                        Ok(commands) => Message::CommandsLoaded(device_id_clone, commands),
+                                        Err(e) => {
+                                            tracing::error!("Failed to get run commands: {}", e);
+                                            Message::None
+                                        }
+                                    }
+                                })
+                            } else {
+                                Task::none()
+                            }
                         }
                         DeviceAction::Presenter => cosmic::task::future(async move {
                             if let Err(e) = client.start_presenter(&device_id).await {
@@ -2166,6 +2398,13 @@ impl Application for CosmicConnectManager {
             }
             Message::ExecuteCommand(device_id, command_id) => {
                 tracing::info!("Executing command {} on device {}", command_id, device_id);
+                // TODO: Need to add DBus method to trigger command execution via plugin
+                // Commands are executed by the RunCommand plugin when it receives a packet
+                // with "key" field containing the command_id
+                // For now, just close the dialog
+                self.show_runcommand_dialog = false;
+                self.runcommand_device_id = None;
+                self.available_commands.clear();
                 Task::none()
             }
             // SMS dialog handlers
@@ -2338,6 +2577,60 @@ impl Application for CosmicConnectManager {
                         Message::None
                     })
                 } else {
+                    Task::none()
+                }
+            }
+            // Remote input dialog handlers
+            Message::OpenRemoteInputDialog(device_id) => {
+                self.show_remote_input_dialog = true;
+                self.remote_input_device_id = Some(device_id);
+                Task::none()
+            }
+            Message::CloseRemoteInputDialog => {
+                self.show_remote_input_dialog = false;
+                self.remote_input_device_id = None;
+                Task::none()
+            }
+            Message::SendRemoteInput(device_id, x, y, action) => {
+                if let Some(client) = &self.dbus_client {
+                    let client = client.clone();
+                    cosmic::task::future(async move {
+                        if let Err(e) = client.send_mirror_input(device_id, x, y, action).await {
+                            tracing::error!("Failed to send remote input: {}", e);
+                        }
+                        Message::None
+                    })
+                } else {
+                    Task::none()
+                }
+            }
+            // Power dialog handlers
+            Message::OpenPowerDialog(device_id) => {
+                self.show_power_dialog = true;
+                self.power_device_id = Some(device_id);
+                Task::none()
+            }
+            Message::ClosePowerDialog => {
+                self.show_power_dialog = false;
+                self.power_device_id = None;
+                Task::none()
+            }
+            Message::ExecutePowerAction(device_id, action) => {
+                if let Some(client) = &self.dbus_client {
+                    let client = client.clone();
+                    self.show_power_dialog = false;
+                    self.power_device_id = None;
+                    cosmic::task::future(async move {
+                        if let Err(e) = client.power_action(&device_id, &action).await {
+                            tracing::error!("Failed to execute power action '{}': {}", action, e);
+                        } else {
+                            tracing::info!("Power action '{}' sent to device {}", action, device_id);
+                        }
+                        Message::None
+                    })
+                } else {
+                    self.show_power_dialog = false;
+                    self.power_device_id = None;
                     Task::none()
                 }
             }

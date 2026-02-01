@@ -428,6 +428,9 @@ pub struct ClipboardHistoryPlugin {
     /// Configuration
     #[allow(dead_code)]
     config: ClipboardHistoryConfig,
+
+    /// Packet sender for response packets
+    packet_sender: Option<tokio::sync::mpsc::Sender<(String, Packet)>>,
 }
 
 impl ClipboardHistoryPlugin {
@@ -461,6 +464,7 @@ impl ClipboardHistoryPlugin {
             memory_storage: ClipboardHistoryStorage::new(config.clone()),
             sqlite_storage,
             config,
+            packet_sender: None,
         }
     }
 
@@ -479,6 +483,7 @@ impl ClipboardHistoryPlugin {
             memory_storage: ClipboardHistoryStorage::new(config.clone()),
             sqlite_storage: None,
             config,
+            packet_sender: None,
         }
     }
 
@@ -738,10 +743,15 @@ impl ClipboardHistoryPlugin {
         let results = self.search(query, limit);
         info!("Found {} matching items", results.len());
 
-        // TODO: Send result packet back to device
-        // Need packet sending infrastructure
-        // let response = self.create_result_packet(query, results);
-        // device.send_packet(&response).await?;
+        // Send result packet back to device
+        let response = self.create_result_packet(query, results);
+        if let (Some(device_id), Some(sender)) = (&self.device_id, &self.packet_sender) {
+            if let Err(e) = sender.send((device_id.clone(), response)).await {
+                warn!("Failed to send clipboard search results packet: {}", e);
+            }
+        } else {
+            warn!("Cannot send search results - plugin not properly initialized");
+        }
 
         Ok(())
     }
@@ -793,9 +803,10 @@ impl Plugin for ClipboardHistoryPlugin {
     async fn init(
         &mut self,
         device: &Device,
-        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+        packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
     ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
+        self.packet_sender = Some(packet_sender);
         info!(
             "ClipboardHistory plugin initialized for device {}",
             device.name()

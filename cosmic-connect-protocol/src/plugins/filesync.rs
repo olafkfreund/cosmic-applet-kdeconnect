@@ -61,7 +61,9 @@ use crate::payload::{PayloadClient, PayloadServer};
 use crate::plugins::{Plugin, PluginFactory};
 use crate::{Device, Packet, ProtocolError, Result};
 use async_trait::async_trait;
+use globset::{Glob, GlobSetBuilder};
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashMap;
@@ -432,13 +434,32 @@ impl FileSyncPlugin {
         local_path: PathBuf,
         conflict_strategy: ConflictStrategy,
     ) -> Result<()> {
+        self.configure_folder_with_options(
+            folder_id,
+            local_path.clone(),
+            local_path,
+            conflict_strategy,
+            Vec::new(),
+        )
+        .await
+    }
+
+    /// Add or update sync folder configuration with full options
+    pub async fn configure_folder_with_options(
+        &mut self,
+        folder_id: String,
+        local_path: PathBuf,
+        remote_path: PathBuf,
+        conflict_strategy: ConflictStrategy,
+        ignore_patterns: Vec<String>,
+    ) -> Result<()> {
         let config = SyncFolder {
             folder_id: folder_id.clone(),
             local_path: local_path.clone(),
-            remote_path: PathBuf::new(), // TODO: Allow configuring remote path
+            remote_path,
             enabled: true,
             bidirectional: true,
-            ignore_patterns: Vec::new(),
+            ignore_patterns,
             conflict_strategy,
             versioning: false,
             version_keep: DEFAULT_VERSION_KEEP,
@@ -474,7 +495,34 @@ impl FileSyncPlugin {
             }
         }
 
-        // TODO: Trigger initial index generation
+        // Generate initial index and send to remote
+        if self.enabled {
+            match self.generate_index(&folder_id).await {
+                Ok(index) => {
+                    info!(
+                        "Generated initial index for '{}': {} files",
+                        folder_id, index.file_count
+                    );
+
+                    self.sync_indexes.insert(folder_id.clone(), index.clone());
+
+                    if let Some(sender) = &self.packet_sender {
+                        if let Some(device_id) = &self.device_id {
+                            let packet = Packet::new(
+                                "cconnect.filesync.index",
+                                serde_json::to_value(&index).unwrap_or(serde_json::Value::Null),
+                            );
+                            if let Err(e) = sender.send((device_id.clone(), packet)).await {
+                                warn!("Failed to send initial index: {}", e);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to generate initial index for '{}': {}", folder_id, e);
+                }
+            }
+        }
 
         self.save_config().await?;
 
@@ -568,33 +616,43 @@ impl FileSyncPlugin {
         let mut files = Vec::new();
         let mut total_size = 0;
 
+        let mut globset_builder = GlobSetBuilder::new();
+
+        for pattern in &config.ignore_patterns {
+            if let Ok(glob) = Glob::new(pattern) {
+                globset_builder.add(glob);
+            } else {
+                warn!("Invalid glob pattern ignored: {}", pattern);
+            }
+        }
+
+        if let Ok(glob) = Glob::new("**/.git/**") {
+            globset_builder.add(glob);
+        }
+        if let Ok(glob) = Glob::new("**/.DS_Store") {
+            globset_builder.add(glob);
+        }
+
+        let globset = globset_builder
+            .build()
+            .map_err(|e| ProtocolError::Plugin(format!("Failed to build globset: {}", e)))?;
+
         for entry in WalkDir::new(&config.local_path)
             .into_iter()
             .filter_map(|e| e.ok())
         {
             let path = entry.path();
 
-            // Skip the root folder itself
             if path == config.local_path {
                 continue;
             }
 
-            // Calculate relative path
             let relative_path = match path.strip_prefix(&config.local_path) {
                 Ok(p) => p.to_path_buf(),
                 Err(_) => continue,
             };
 
-            // Basic ignore logic (TODO: Use robust glob matching)
-            let path_str = relative_path.to_string_lossy();
-            if config
-                .ignore_patterns
-                .iter()
-                .any(|pattern| path_str.contains(pattern))
-            {
-                continue;
-            }
-            if path_str.contains(".git") || path_str.contains(".DS_Store") {
+            if globset.is_match(&relative_path) {
                 continue;
             }
 
@@ -904,6 +962,132 @@ impl Default for FileSyncPlugin {
 }
 
 impl FileSyncPlugin {
+    fn get_db_path(device_id: &str) -> Result<PathBuf> {
+        let home_dir = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .map_err(|_| {
+                ProtocolError::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Could not determine home directory",
+                ))
+            })?;
+
+        let db_path = PathBuf::from(home_dir)
+            .join(".config")
+            .join("cconnect")
+            .join(device_id)
+            .join("filesync")
+            .join("sync_state.db");
+
+        Ok(db_path)
+    }
+
+    async fn save_sync_state(&self) -> Result<()> {
+        if let Some(device_id) = &self.device_id {
+            let db_path = Self::get_db_path(device_id)?;
+
+            if let Some(parent) = db_path.parent() {
+                tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                    ProtocolError::Plugin(format!("Failed to create database directory: {}", e))
+                })?;
+            }
+
+            let db_path_clone = db_path.clone();
+            let sync_indexes = self.sync_indexes.clone();
+            let pending_conflicts = self.pending_conflicts.clone();
+
+            tokio::task::spawn_blocking(move || {
+                let conn = Connection::open(&db_path_clone).map_err(|e| {
+                    ProtocolError::Plugin(format!("Failed to open database: {}", e))
+                })?;
+
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS sync_indexes (
+                        folder_id TEXT PRIMARY KEY,
+                        timestamp INTEGER NOT NULL,
+                        file_count INTEGER NOT NULL,
+                        total_size INTEGER NOT NULL,
+                        index_data TEXT NOT NULL
+                    )",
+                    [],
+                )
+                .map_err(|e| {
+                    ProtocolError::Plugin(format!("Failed to create sync_indexes table: {}", e))
+                })?;
+
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS pending_conflicts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        folder_id TEXT NOT NULL,
+                        path TEXT NOT NULL,
+                        timestamp INTEGER NOT NULL,
+                        conflict_data TEXT NOT NULL
+                    )",
+                    [],
+                )
+                .map_err(|e| {
+                    ProtocolError::Plugin(format!(
+                        "Failed to create pending_conflicts table: {}",
+                        e
+                    ))
+                })?;
+
+                for (folder_id, index) in sync_indexes {
+                    let index_json = serde_json::to_string(&index).map_err(|e| {
+                        ProtocolError::Plugin(format!("Failed to serialize index: {}", e))
+                    })?;
+
+                    conn.execute(
+                        "INSERT OR REPLACE INTO sync_indexes (folder_id, timestamp, file_count, total_size, index_data)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        params![
+                            folder_id,
+                            index.timestamp,
+                            index.file_count as i64,
+                            index.total_size as i64,
+                            index_json
+                        ],
+                    )
+                    .map_err(|e| {
+                        ProtocolError::Plugin(format!("Failed to insert sync index: {}", e))
+                    })?;
+                }
+
+                conn.execute("DELETE FROM pending_conflicts", [])
+                    .map_err(|e| {
+                        ProtocolError::Plugin(format!("Failed to clear pending conflicts: {}", e))
+                    })?;
+
+                for conflict in pending_conflicts {
+                    let conflict_json = serde_json::to_string(&conflict).map_err(|e| {
+                        ProtocolError::Plugin(format!("Failed to serialize conflict: {}", e))
+                    })?;
+
+                    conn.execute(
+                        "INSERT INTO pending_conflicts (folder_id, path, timestamp, conflict_data)
+                         VALUES (?1, ?2, ?3, ?4)",
+                        params![
+                            conflict.folder_id,
+                            conflict.path.to_string_lossy().to_string(),
+                            conflict.timestamp,
+                            conflict_json
+                        ],
+                    )
+                    .map_err(|e| {
+                        ProtocolError::Plugin(format!("Failed to insert conflict: {}", e))
+                    })?;
+                }
+
+                debug!("Saved sync state to database");
+                Ok::<(), ProtocolError>(())
+            })
+            .await
+            .map_err(|e| ProtocolError::Plugin(format!("Database task panicked: {}", e)))??;
+        }
+
+        Ok(())
+    }
+
     async fn initiate_upload(
         &self,
         device_id: String,
@@ -1139,8 +1323,17 @@ impl Plugin for FileSyncPlugin {
         self.enabled = false;
         self.watcher = None;
 
-        // TODO: Cancel active transfers
-        // TODO: Save sync state to database
+        if let Some(handle) = self.watcher_handle.take() {
+            handle.abort();
+            debug!("Aborted watcher task");
+        }
+
+        self.active_transfers.clear();
+        debug!("Cleared active transfers");
+
+        if let Err(e) = self.save_sync_state().await {
+            warn!("Failed to save sync state during shutdown: {}", e);
+        }
 
         Ok(())
     }
@@ -1355,7 +1548,9 @@ impl Plugin for FileSyncPlugin {
                                 target_path.display()
                             );
 
-                            // Spawn download task
+                            let sync_folders = self.sync_folders.clone();
+                            let folder_id_clone = folder_id.clone();
+
                             tokio::spawn(async move {
                                 match PayloadClient::new(&host, port).await {
                                     Ok(client) => {
@@ -1372,7 +1567,21 @@ impl Plugin for FileSyncPlugin {
                                                 "Successfully received file {}",
                                                 target_path.display()
                                             );
-                                            // TODO: Update sync index locally
+
+                                            let folders = sync_folders.read().await;
+                                            if let Some(config) = folders.get(&folder_id_clone) {
+                                                if let Ok(index) = Self::generate_index_internal(
+                                                    &folder_id_clone,
+                                                    config,
+                                                )
+                                                .await
+                                                {
+                                                    debug!(
+                                                        "Updated local sync index after receiving file: {} files",
+                                                        index.file_count
+                                                    );
+                                                }
+                                            }
                                         }
                                     }
                                     Err(e) => {

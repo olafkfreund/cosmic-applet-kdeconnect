@@ -221,6 +221,9 @@ pub struct SystemMonitorPlugin {
 
     /// Cached process list
     processes: Arc<RwLock<Vec<ProcessInfo>>>,
+
+    /// Packet sender for response packets
+    packet_sender: Option<tokio::sync::mpsc::Sender<(String, Packet)>>,
 }
 
 impl SystemMonitorPlugin {
@@ -231,6 +234,7 @@ impl SystemMonitorPlugin {
             enabled: true,
             stats: Arc::new(RwLock::new(SystemStats::default())),
             processes: Arc::new(RwLock::new(Vec::new())),
+            packet_sender: None,
         }
     }
 
@@ -647,7 +651,15 @@ impl SystemMonitorPlugin {
                     device.name(),
                     response.body
                 );
-                // TODO: Send response packet through device connection
+
+                // Send response packet
+                if let (Some(device_id), Some(sender)) = (&self.device_id, &self.packet_sender) {
+                    if let Err(e) = sender.send((device_id.clone(), response)).await {
+                        warn!("Failed to send system stats packet: {}", e);
+                    }
+                } else {
+                    warn!("Cannot send system stats - plugin not properly initialized");
+                }
             }
             "processes" => {
                 let limit = packet
@@ -673,7 +685,15 @@ impl SystemMonitorPlugin {
                     device.name(),
                     response.body
                 );
-                // TODO: Send response packet through device connection
+
+                // Send response packet
+                if let (Some(device_id), Some(sender)) = (&self.device_id, &self.packet_sender) {
+                    if let Err(e) = sender.send((device_id.clone(), response)).await {
+                        warn!("Failed to send process list packet: {}", e);
+                    }
+                } else {
+                    warn!("Cannot send process list - plugin not properly initialized");
+                }
             }
             _ => {
                 warn!("Unknown system monitor request type: {}", request_type);
@@ -721,9 +741,10 @@ impl Plugin for SystemMonitorPlugin {
     async fn init(
         &mut self,
         device: &Device,
-        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+        packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
     ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
+        self.packet_sender = Some(packet_sender);
         info!(
             "SystemMonitor plugin initialized for device {}",
             device.name()

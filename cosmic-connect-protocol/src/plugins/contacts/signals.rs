@@ -30,13 +30,13 @@
 //! ```rust,ignore
 //! use cosmic_connect_protocol::plugins::contacts::signals::ContactsSignals;
 //!
-//! let signals = ContactsSignals::new(connection).await?;
+//! let signals = ContactsSignals::new().await?;
 //!
 //! // When contact is added
-//! signals.contact_added("device-123", "contact-456", "John Doe").await?;
+//! signals.emit_contact_added("device-123", "contact-456", "John Doe").await?;
 //!
 //! // When sync completes
-//! signals.sync_completed("device-123", 100, 5, 2).await?;
+//! signals.emit_sync_completed("device-123", 100, 5, 2).await?;
 //! ```
 //!
 //! ### Listening for Signals (from UI apps)
@@ -64,55 +64,42 @@
 //! ```
 
 use tracing::{debug, info};
+use zbus::object_server::SignalEmitter;
+use zbus::{interface, Connection};
+
+/// DBus object path for contacts signals
+pub const CONTACTS_OBJECT_PATH: &str = "/org/cosmic/Connect/Contacts";
 
 /// DBus signal interface for contacts
-///
-/// Note: This is a **stub implementation** for now.
-/// Full implementation requires zbus integration in the daemon.
 pub struct ContactsSignals {
-    // TODO: Add zbus::Connection field
-    // connection: zbus::Connection,
+    connection: Connection,
 }
 
 impl ContactsSignals {
-    /// Create new contacts signals interface
+    /// Create new contacts signals interface and register on DBus
     ///
-    /// # Full Implementation
-    ///
-    /// In `cosmic-connect-daemon`:
-    /// ```rust,ignore
-    /// use zbus::{Connection, interface};
-    ///
-    /// #[interface(name = "org.cosmic.Connect.Contacts")]
-    /// impl ContactsSignals {
-    ///     #[zbus(signal)]
-    ///     async fn contact_added(
-    ///         signal_ctx: &SignalContext<'_>,
-    ///         device_id: &str,
-    ///         uid: &str,
-    ///         name: &str
-    ///     ) -> zbus::Result<()>;
-    ///
-    ///     // ... other signals
-    /// }
-    /// ```
+    /// Connects to the session bus and registers the interface at the contacts object path.
     pub async fn new() -> Result<Self, Box<dyn std::error::Error>> {
         info!("Initializing contacts DBus signals");
 
-        // TODO: Connect to session bus
-        // let connection = Connection::session().await?;
+        let connection = Connection::session().await?;
 
-        // TODO: Register object at path
-        // connection
-        //     .object_server()
-        //     .at("/org/cosmic/Connect/Contacts", self)
-        //     .await?;
+        let signals = Self {
+            connection: connection.clone(),
+        };
 
-        Ok(Self {})
+        connection
+            .object_server()
+            .at(CONTACTS_OBJECT_PATH, signals.clone())
+            .await?;
+
+        info!("Contacts DBus signals registered at {}", CONTACTS_OBJECT_PATH);
+
+        Ok(signals)
     }
 
     /// Emit signal when contact is added
-    pub async fn contact_added(
+    pub async fn emit_contact_added(
         &self,
         device_id: &str,
         uid: &str,
@@ -123,15 +110,20 @@ impl ContactsSignals {
             device_id, uid, name
         );
 
-        // TODO: Emit DBus signal
-        // self.contact_added_signal(signal_ctx, device_id, uid, name).await?;
+        let iface_ref = self
+            .connection
+            .object_server()
+            .interface::<_, ContactsSignals>(CONTACTS_OBJECT_PATH)
+            .await?;
+
+        Self::contact_added(iface_ref.signal_emitter(), device_id, uid, name).await?;
 
         info!("Contact added: {} ({})", name, uid);
         Ok(())
     }
 
     /// Emit signal when contact is updated
-    pub async fn contact_updated(
+    pub async fn emit_contact_updated(
         &self,
         device_id: &str,
         uid: &str,
@@ -142,15 +134,20 @@ impl ContactsSignals {
             device_id, uid, name
         );
 
-        // TODO: Emit DBus signal
-        // self.contact_updated_signal(signal_ctx, device_id, uid, name).await?;
+        let iface_ref = self
+            .connection
+            .object_server()
+            .interface::<_, ContactsSignals>(CONTACTS_OBJECT_PATH)
+            .await?;
+
+        Self::contact_updated(iface_ref.signal_emitter(), device_id, uid, name).await?;
 
         info!("Contact updated: {} ({})", name, uid);
         Ok(())
     }
 
     /// Emit signal when contact is deleted
-    pub async fn contact_deleted(
+    pub async fn emit_contact_deleted(
         &self,
         device_id: &str,
         uid: &str,
@@ -160,15 +157,20 @@ impl ContactsSignals {
             device_id, uid
         );
 
-        // TODO: Emit DBus signal
-        // self.contact_deleted_signal(signal_ctx, device_id, uid).await?;
+        let iface_ref = self
+            .connection
+            .object_server()
+            .interface::<_, ContactsSignals>(CONTACTS_OBJECT_PATH)
+            .await?;
+
+        Self::contact_deleted(iface_ref.signal_emitter(), device_id, uid).await?;
 
         info!("Contact deleted: {}", uid);
         Ok(())
     }
 
     /// Emit signal when sync operation completes
-    pub async fn sync_completed(
+    pub async fn emit_sync_completed(
         &self,
         device_id: &str,
         total: u32,
@@ -180,8 +182,13 @@ impl ContactsSignals {
             device_id, total, added, updated
         );
 
-        // TODO: Emit DBus signal
-        // self.sync_completed_signal(signal_ctx, device_id, total, added, updated).await?;
+        let iface_ref = self
+            .connection
+            .object_server()
+            .interface::<_, ContactsSignals>(CONTACTS_OBJECT_PATH)
+            .await?;
+
+        Self::sync_completed(iface_ref.signal_emitter(), device_id, total, added, updated).await?;
 
         info!(
             "Contacts sync completed for {}: {} total ({} added, {} updated)",
@@ -191,7 +198,7 @@ impl ContactsSignals {
     }
 
     /// Emit signal for batch contact changes
-    pub async fn contacts_changed(
+    pub async fn emit_contacts_changed(
         &self,
         device_id: &str,
         changed_uids: Vec<String>,
@@ -202,12 +209,96 @@ impl ContactsSignals {
             changed_uids.len()
         );
 
-        // TODO: Emit DBus signal for batch changes
-        // self.contacts_changed_signal(signal_ctx, device_id, &changed_uids).await?;
+        let iface_ref = self
+            .connection
+            .object_server()
+            .interface::<_, ContactsSignals>(CONTACTS_OBJECT_PATH)
+            .await?;
+
+        Self::contacts_changed(iface_ref.signal_emitter(), device_id, &changed_uids).await?;
 
         info!("{} contacts changed for {}", changed_uids.len(), device_id);
         Ok(())
     }
+}
+
+impl Clone for ContactsSignals {
+    fn clone(&self) -> Self {
+        Self {
+            connection: self.connection.clone(),
+        }
+    }
+}
+
+#[interface(name = "org.cosmic.Connect.Contacts")]
+impl ContactsSignals {
+    /// Signal emitted when a new contact is added
+    ///
+    /// # Arguments
+    /// * `device_id` - Device ID that the contact belongs to
+    /// * `uid` - Unique contact identifier
+    /// * `name` - Contact display name
+    #[zbus(signal)]
+    async fn contact_added(
+        signal_emitter: &SignalEmitter<'_>,
+        device_id: &str,
+        uid: &str,
+        name: &str,
+    ) -> zbus::Result<()>;
+
+    /// Signal emitted when a contact is updated
+    ///
+    /// # Arguments
+    /// * `device_id` - Device ID that the contact belongs to
+    /// * `uid` - Unique contact identifier
+    /// * `name` - Updated contact display name
+    #[zbus(signal)]
+    async fn contact_updated(
+        signal_emitter: &SignalEmitter<'_>,
+        device_id: &str,
+        uid: &str,
+        name: &str,
+    ) -> zbus::Result<()>;
+
+    /// Signal emitted when a contact is deleted
+    ///
+    /// # Arguments
+    /// * `device_id` - Device ID that the contact belonged to
+    /// * `uid` - Unique contact identifier
+    #[zbus(signal)]
+    async fn contact_deleted(
+        signal_emitter: &SignalEmitter<'_>,
+        device_id: &str,
+        uid: &str,
+    ) -> zbus::Result<()>;
+
+    /// Signal emitted when a sync operation completes
+    ///
+    /// # Arguments
+    /// * `device_id` - Device ID that was synced
+    /// * `total` - Total number of contacts
+    /// * `added` - Number of contacts added
+    /// * `updated` - Number of contacts updated
+    #[zbus(signal)]
+    async fn sync_completed(
+        signal_emitter: &SignalEmitter<'_>,
+        device_id: &str,
+        total: u32,
+        added: u32,
+        updated: u32,
+    ) -> zbus::Result<()>;
+
+    /// Signal emitted when multiple contacts change
+    ///
+    /// # Arguments
+    /// * `device_id` - Device ID where contacts changed
+    /// * `changed_uids` - List of contact UIDs that changed
+    #[zbus(signal)]
+    async fn contacts_changed(
+        signal_emitter: &SignalEmitter<'_>,
+        device_id: &str,
+        changed_uids: &[String],
+    ) -> zbus::Result<()>;
 }
 
 /// Contact event type for unified handling
@@ -246,7 +337,7 @@ impl ContactEvent {
                 name,
             } => {
                 signals
-                    .contact_added(device_id, uid, name.as_deref().unwrap_or("Unknown"))
+                    .emit_contact_added(device_id, uid, name.as_deref().unwrap_or("Unknown"))
                     .await
             }
             ContactEvent::Updated {
@@ -255,11 +346,11 @@ impl ContactEvent {
                 name,
             } => {
                 signals
-                    .contact_updated(device_id, uid, name.as_deref().unwrap_or("Unknown"))
+                    .emit_contact_updated(device_id, uid, name.as_deref().unwrap_or("Unknown"))
                     .await
             }
             ContactEvent::Deleted { device_id, uid } => {
-                signals.contact_deleted(device_id, uid).await
+                signals.emit_contact_deleted(device_id, uid).await
             }
             ContactEvent::SyncCompleted {
                 device_id,
@@ -268,7 +359,7 @@ impl ContactEvent {
                 updated,
             } => {
                 signals
-                    .sync_completed(device_id, *total, *added, *updated)
+                    .emit_sync_completed(device_id, *total, *added, *updated)
                     .await
             }
         }
@@ -281,12 +372,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_signals_creation() {
-        let signals = ContactsSignals::new().await;
-        assert!(signals.is_ok());
+        // Note: This test requires a DBus session bus to be available
+        // In CI environments without DBus, this will fail gracefully
+        match ContactsSignals::new().await {
+            Ok(_) => {
+                // Successfully connected to session bus
+            }
+            Err(e) => {
+                // Expected in environments without DBus
+                eprintln!("Note: DBus session bus not available: {}", e);
+            }
+        }
     }
 
     #[tokio::test]
-    async fn test_contact_event() {
+    async fn test_contact_event_types() {
         let event = ContactEvent::Added {
             device_id: "device-123".to_string(),
             uid: "contact-456".to_string(),
@@ -296,6 +396,72 @@ mod tests {
         match event {
             ContactEvent::Added { ref name, .. } => {
                 assert_eq!(name.as_deref(), Some("John Doe"));
+            }
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_contact_event_updated() {
+        let event = ContactEvent::Updated {
+            device_id: "device-456".to_string(),
+            uid: "contact-789".to_string(),
+            name: Some("Jane Smith".to_string()),
+        };
+
+        match event {
+            ContactEvent::Updated {
+                ref device_id,
+                ref uid,
+                ref name,
+            } => {
+                assert_eq!(device_id, "device-456");
+                assert_eq!(uid, "contact-789");
+                assert_eq!(name.as_deref(), Some("Jane Smith"));
+            }
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_contact_event_deleted() {
+        let event = ContactEvent::Deleted {
+            device_id: "device-123".to_string(),
+            uid: "contact-999".to_string(),
+        };
+
+        match event {
+            ContactEvent::Deleted {
+                ref device_id,
+                ref uid,
+            } => {
+                assert_eq!(device_id, "device-123");
+                assert_eq!(uid, "contact-999");
+            }
+            _ => panic!("Wrong event type"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_contact_event_sync_completed() {
+        let event = ContactEvent::SyncCompleted {
+            device_id: "device-abc".to_string(),
+            total: 100,
+            added: 10,
+            updated: 5,
+        };
+
+        match event {
+            ContactEvent::SyncCompleted {
+                ref device_id,
+                total,
+                added,
+                updated,
+            } => {
+                assert_eq!(device_id, "device-abc");
+                assert_eq!(total, 100);
+                assert_eq!(added, 10);
+                assert_eq!(updated, 5);
             }
             _ => panic!("Wrong event type"),
         }

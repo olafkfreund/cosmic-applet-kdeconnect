@@ -145,6 +145,9 @@ pub struct PowerPlugin {
 
     /// Logind backend for power actions (shutdown, reboot, suspend, hibernate)
     logind: LogindBackend,
+
+    /// Packet sender for response packets
+    packet_sender: Option<tokio::sync::mpsc::Sender<(String, Packet)>>,
 }
 
 impl PowerPlugin {
@@ -157,6 +160,7 @@ impl PowerPlugin {
             inhibitor: SystemdInhibitor::new(),
             inhibitor_lock: None,
             upower: UPowerBackend::new(),
+            packet_sender: None,
             logind: LogindBackend::new(),
         }
     }
@@ -430,7 +434,7 @@ impl PowerPlugin {
         );
 
         // Create status response packet
-        let _response = self.create_status_response(
+        let response = self.create_status_response(
             state,
             self.is_sleep_inhibited(),
             battery_present,
@@ -439,8 +443,14 @@ impl PowerPlugin {
             battery_state,
         );
 
-        // TODO: Send status response packet back to device
-        // device.send_packet(&response).await?;
+        // Send status response packet back to device
+        if let (Some(device_id), Some(sender)) = (&self.device_id, &self.packet_sender) {
+            if let Err(e) = sender.send((device_id.clone(), response)).await {
+                warn!("Failed to send power status packet: {}", e);
+            }
+        } else {
+            warn!("Cannot send power status - plugin not properly initialized");
+        }
 
         Ok(())
     }
@@ -534,9 +544,10 @@ impl Plugin for PowerPlugin {
     async fn init(
         &mut self,
         device: &Device,
-        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+        packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
     ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
+        self.packet_sender = Some(packet_sender);
         info!("Power plugin initialized for device {}", device.name());
         Ok(())
     }

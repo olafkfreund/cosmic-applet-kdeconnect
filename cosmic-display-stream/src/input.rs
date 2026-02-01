@@ -6,7 +6,19 @@
 //! 1. Receiving touch events from WebRTC data channels
 //! 2. Converting normalized tablet coordinates to desktop coordinates
 //! 3. Mapping to virtual display position in desktop space
-//! 4. Injecting pointer events using virtual input protocols
+//! 4. Injecting pointer events using libei/reis through the enigo library
+//!
+//! ## Input Injection Implementation
+//!
+//! Touch input is injected into the COSMIC desktop using the `enigo` crate with
+//! the `libei_tokio` feature. This uses the libei/reis protocol for Wayland
+//! emulated input, which is the modern standard for input injection on Wayland.
+//!
+//! The implementation:
+//! - Lazily initializes enigo on first touch event
+//! - Falls back gracefully if libei is not available (test environments)
+//! - Converts touch events to absolute pointer positions
+//! - Handles multi-touch by tracking active touch points
 //!
 //! ## Coordinate System
 //!
@@ -27,10 +39,18 @@
 //!   desktop_x = 1920 + (0.5 * 2560) = 3200
 //!   desktop_y = 0 + (0.5 * 1600) = 800
 //! ```
+//!
+//! ## Requirements
+//!
+//! - COSMIC Desktop or other compositor with libei/reis support
+//! - Remote Desktop portal access for input injection
+//! - Proper permissions for emulated input
 
 use crate::error::{DisplayStreamError, Result};
+use enigo::{Button, Coordinate, Direction, Enigo, Mouse, Settings};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, trace, warn};
+use std::sync::{Arc, Mutex};
+use tracing::{debug, error, trace, warn};
 
 /// Touch action types
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -207,6 +227,9 @@ pub struct InputHandler {
     /// Active touch points (for multi-touch tracking)
     active_touches: std::collections::HashMap<u32, DesktopCoordinates>,
 
+    /// Enigo instance for input injection (wrapped in Arc<Mutex<>> for interior mutability)
+    enigo: Arc<Mutex<Option<Enigo>>>,
+
     /// Statistics
     events_processed: u64,
     events_injected: u64,
@@ -241,12 +264,59 @@ impl InputHandler {
             geometry.offset.0, geometry.offset.1, geometry.size.0, geometry.size.1
         );
 
+        // Initialize enigo with default settings
+        // We delay initialization until first use to handle potential errors
+        let enigo = Arc::new(Mutex::new(None));
+
         Self {
             geometry,
             active_touches: std::collections::HashMap::new(),
+            enigo,
             events_processed: 0,
             events_injected: 0,
             events_failed: 0,
+        }
+    }
+
+    /// Initialize the enigo instance for input injection
+    ///
+    /// This is called lazily on first use. It attempts to create an Enigo
+    /// instance with libei support for Wayland.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if enigo initialization fails (e.g., no libei support)
+    fn ensure_enigo_initialized(&self) -> Result<bool> {
+        let mut enigo_guard = self.enigo.lock().map_err(|e| {
+            DisplayStreamError::Input(format!("Failed to acquire enigo lock: {}", e))
+        })?;
+
+        if enigo_guard.is_none() {
+            // Skip initialization in test mode to avoid panics from missing portals
+            #[cfg(test)]
+            {
+                warn!("Skipping enigo initialization in test mode");
+                return Ok(false);
+            }
+
+            #[cfg(not(test))]
+            {
+                debug!("Initializing enigo for input injection");
+                match Enigo::new(&Settings::default()) {
+                    Ok(enigo) => {
+                        *enigo_guard = Some(enigo);
+                        debug!("Enigo initialized successfully");
+                        Ok(true)
+                    }
+                    Err(e) => {
+                        // In environments without compositor support, this is expected
+                        warn!("Failed to initialize enigo: {}. Input injection will be simulated.", e);
+                        Ok(false)
+                    }
+                }
+            }
+        } else {
+            Ok(true)
         }
     }
 
@@ -389,7 +459,6 @@ impl InputHandler {
     }
 
     /// Handle touch down event
-    #[allow(clippy::unnecessary_wraps)]
     fn handle_touch_down(&mut self, touch_id: u32, coords: DesktopCoordinates) -> Result<()> {
         debug!(
             "Touch down: id={}, coords=({}, {})",
@@ -400,14 +469,13 @@ impl InputHandler {
         self.active_touches.insert(touch_id, coords);
 
         // Inject pointer down event
-        self.inject_pointer_down(coords);
+        self.inject_pointer_down(coords)?;
 
         self.events_injected += 1;
         Ok(())
     }
 
     /// Handle touch move event
-    #[allow(clippy::unnecessary_wraps)]
     fn handle_touch_move(&mut self, touch_id: u32, coords: DesktopCoordinates) -> Result<()> {
         trace!(
             "Touch move: id={}, coords=({}, {})",
@@ -426,14 +494,13 @@ impl InputHandler {
         }
 
         // Inject pointer move event
-        self.inject_pointer_move(coords);
+        self.inject_pointer_move(coords)?;
 
         self.events_injected += 1;
         Ok(())
     }
 
     /// Handle touch up event
-    #[allow(clippy::unnecessary_wraps)]
     fn handle_touch_up(&mut self, touch_id: u32, coords: DesktopCoordinates) -> Result<()> {
         debug!(
             "Touch up: id={}, coords=({}, {})",
@@ -444,21 +511,20 @@ impl InputHandler {
         self.active_touches.remove(&touch_id);
 
         // Inject pointer up event
-        self.inject_pointer_up(coords);
+        self.inject_pointer_up(coords)?;
 
         self.events_injected += 1;
         Ok(())
     }
 
     /// Handle touch cancel event
-    #[allow(clippy::unnecessary_wraps)]
     fn handle_touch_cancel(&mut self, touch_id: u32) -> Result<()> {
         debug!("Touch cancel: id={}", touch_id);
 
         // Remove from active touches
         if let Some(coords) = self.active_touches.remove(&touch_id) {
             // Inject pointer up to clean up
-            self.inject_pointer_up(coords);
+            self.inject_pointer_up(coords)?;
             self.events_injected += 1;
         }
 
@@ -467,44 +533,138 @@ impl InputHandler {
 
     /// Inject pointer down event
     ///
-    /// TODO: Integrate with libei/reis for actual pointer injection
-    /// For now, this is a stub that logs the action.
-    #[allow(clippy::unused_self)]
-    fn inject_pointer_down(&self, coords: DesktopCoordinates) {
-        // TODO: Use libei to inject pointer events
-        // This requires:
-        // 1. Connect to libei/reis compositor interface
-        // 2. Create virtual pointer device
-        // 3. Send button press event with coordinates
-        trace!(
-            "STUB: Would inject pointer down at ({}, {})",
-            coords.x,
-            coords.y
-        );
+    /// Uses enigo to inject a left mouse button press at the specified coordinates.
+    /// In test environments where enigo cannot initialize, this logs the action.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if injection fails
+    fn inject_pointer_down(&mut self, coords: DesktopCoordinates) -> Result<()> {
+        let initialized = self.ensure_enigo_initialized()?;
+
+        if !initialized {
+            // In test mode or without compositor, just log
+            trace!("Simulated pointer down at ({}, {})", coords.x, coords.y);
+            return Ok(());
+        }
+
+        let mut enigo_guard = self.enigo.lock().map_err(|e| {
+            DisplayStreamError::Input(format!("Failed to acquire enigo lock: {}", e))
+        })?;
+
+        if let Some(enigo) = enigo_guard.as_mut() {
+            // Move to position first (using absolute coordinates)
+            if let Err(e) = enigo.move_mouse(coords.x, coords.y, Coordinate::Abs) {
+                error!("Failed to move mouse to ({}, {}): {}", coords.x, coords.y, e);
+                self.events_failed += 1;
+                return Err(DisplayStreamError::Input(format!(
+                    "Failed to move mouse: {}",
+                    e
+                )));
+            }
+
+            // Press left button
+            if let Err(e) = enigo.button(Button::Left, Direction::Press) {
+                error!("Failed to press mouse button: {}", e);
+                self.events_failed += 1;
+                return Err(DisplayStreamError::Input(format!(
+                    "Failed to press mouse button: {}",
+                    e
+                )));
+            }
+
+            trace!("Injected pointer down at ({}, {})", coords.x, coords.y);
+            Ok(())
+        } else {
+            Ok(())
+        }
     }
 
     /// Inject pointer move event
     ///
-    /// TODO: Integrate with libei/reis for actual pointer injection
-    #[allow(clippy::unused_self)]
-    fn inject_pointer_move(&self, coords: DesktopCoordinates) {
-        trace!(
-            "STUB: Would inject pointer move to ({}, {})",
-            coords.x,
-            coords.y
-        );
+    /// Uses enigo to move the mouse cursor to the specified coordinates.
+    /// In test environments where enigo cannot initialize, this logs the action.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if injection fails
+    fn inject_pointer_move(&mut self, coords: DesktopCoordinates) -> Result<()> {
+        let initialized = self.ensure_enigo_initialized()?;
+
+        if !initialized {
+            // In test mode or without compositor, just log
+            trace!("Simulated pointer move to ({}, {})", coords.x, coords.y);
+            return Ok(());
+        }
+
+        let mut enigo_guard = self.enigo.lock().map_err(|e| {
+            DisplayStreamError::Input(format!("Failed to acquire enigo lock: {}", e))
+        })?;
+
+        if let Some(enigo) = enigo_guard.as_mut() {
+            if let Err(e) = enigo.move_mouse(coords.x, coords.y, Coordinate::Abs) {
+                error!("Failed to move mouse to ({}, {}): {}", coords.x, coords.y, e);
+                self.events_failed += 1;
+                return Err(DisplayStreamError::Input(format!(
+                    "Failed to move mouse: {}",
+                    e
+                )));
+            }
+
+            trace!("Injected pointer move to ({}, {})", coords.x, coords.y);
+            Ok(())
+        } else {
+            Ok(())
+        }
     }
 
     /// Inject pointer up event
     ///
-    /// TODO: Integrate with libei/reis for actual pointer injection
-    #[allow(clippy::unused_self)]
-    fn inject_pointer_up(&self, coords: DesktopCoordinates) {
-        trace!(
-            "STUB: Would inject pointer up at ({}, {})",
-            coords.x,
-            coords.y
-        );
+    /// Uses enigo to release the left mouse button at the specified coordinates.
+    /// In test environments where enigo cannot initialize, this logs the action.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if injection fails
+    fn inject_pointer_up(&mut self, coords: DesktopCoordinates) -> Result<()> {
+        let initialized = self.ensure_enigo_initialized()?;
+
+        if !initialized {
+            // In test mode or without compositor, just log
+            trace!("Simulated pointer up at ({}, {})", coords.x, coords.y);
+            return Ok(());
+        }
+
+        let mut enigo_guard = self.enigo.lock().map_err(|e| {
+            DisplayStreamError::Input(format!("Failed to acquire enigo lock: {}", e))
+        })?;
+
+        if let Some(enigo) = enigo_guard.as_mut() {
+            // Move to position first (using absolute coordinates)
+            if let Err(e) = enigo.move_mouse(coords.x, coords.y, Coordinate::Abs) {
+                error!("Failed to move mouse to ({}, {}): {}", coords.x, coords.y, e);
+                self.events_failed += 1;
+                return Err(DisplayStreamError::Input(format!(
+                    "Failed to move mouse: {}",
+                    e
+                )));
+            }
+
+            // Release left button
+            if let Err(e) = enigo.button(Button::Left, Direction::Release) {
+                error!("Failed to release mouse button: {}", e);
+                self.events_failed += 1;
+                return Err(DisplayStreamError::Input(format!(
+                    "Failed to release mouse button: {}",
+                    e
+                )));
+            }
+
+            trace!("Injected pointer up at ({}, {})", coords.x, coords.y);
+            Ok(())
+        } else {
+            Ok(())
+        }
     }
 
     /// Get number of currently active touches

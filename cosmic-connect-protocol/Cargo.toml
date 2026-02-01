@@ -29,6 +29,14 @@ mouse-keyboard-input = { workspace = true }
 bluer = { workspace = true }
 futures = { workspace = true }
 
+# Wayland overlay for laser pointer
+smithay-client-toolkit = { version = "0.19", default-features = false, features = ["calloop"] }
+wayland-client = "0.31"
+wayland-protocols = "0.32"
+wayland-protocols-wlr = "0.3"
+tiny-skia = "0.11"
+memmap2 = "0.9"
+
 # Legacy pairing module still uses OpenSSL temporarily
 # TODO: Migrate pairing to use cosmic-connect-core CertificateInfo
 openssl = "0.10"
@@ -50,6 +58,7 @@ image = { version = "0.25", optional = true }
 notify = "8.2.0"
 blake3 = "1.8.3"
 walkdir = "2.5.0"
+globset = "0.4"
 rusqlite = { version = "0.38.0", features = ["bundled"] }
 gstreamer = { version = "0.24.4", optional = true }
 gstreamer-app = { version = "0.24.4", optional = true }

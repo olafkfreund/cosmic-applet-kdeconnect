@@ -89,6 +89,7 @@
 
 use crate::{Device, Packet, ProtocolError, Result};
 use async_trait::async_trait;
+use serde_json::json;
 use std::net::UdpSocket;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -118,6 +119,9 @@ pub struct WolPlugin {
 
     /// Whether the plugin is enabled
     enabled: bool,
+
+    /// Packet sender for response packets
+    packet_sender: Option<tokio::sync::mpsc::Sender<(String, Packet)>>,
 }
 
 impl WolPlugin {
@@ -128,6 +132,7 @@ impl WolPlugin {
             mac_address: Arc::new(RwLock::new(None)),
             packets_sent: Arc::new(AtomicU64::new(0)),
             enabled: true,
+            packet_sender: None,
         }
     }
 
@@ -320,15 +325,22 @@ impl WolPlugin {
         // Send magic packet
         self.send_wol_packet(&mac)?;
 
-        // TODO: Send status response back to device
-        // let response = Packet::new(
-        //     "cconnect.wol.status",
-        //     json!({
-        //         "packetSent": true,
-        //         "macAddress": Self::format_mac_address(&mac),
-        //     }),
-        // );
-        // device.send_packet(response).await?;
+        // Send status response back to device
+        let response = Packet::new(
+            "cconnect.wol.status",
+            json!({
+                "packetSent": true,
+                "macAddress": Self::format_mac_address(&mac),
+            }),
+        );
+
+        if let (Some(device_id), Some(sender)) = (&self.device_id, &self.packet_sender) {
+            if let Err(e) = sender.send((device_id.clone(), response)).await {
+                warn!("Failed to send WOL status packet: {}", e);
+            }
+        } else {
+            warn!("Cannot send WOL status - plugin not properly initialized");
+        }
 
         Ok(())
     }
@@ -401,9 +413,10 @@ impl Plugin for WolPlugin {
     async fn init(
         &mut self,
         device: &Device,
-        _packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
+        packet_sender: tokio::sync::mpsc::Sender<(String, Packet)>,
     ) -> Result<()> {
         self.device_id = Some(device.id().to_string());
+        self.packet_sender = Some(packet_sender);
         info!("WOL plugin initialized for device {}", device.name());
 
         // Note: MAC address loading is handled by the daemon
