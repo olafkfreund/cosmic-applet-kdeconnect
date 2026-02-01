@@ -7,6 +7,7 @@ members = [
     "cosmic-connect-manager",
     "cosmic-messages",
     "cosmic-messages-popup",
+    "cosmic-display-stream",
 ]
 
 [workspace.package]
@@ -71,6 +72,7 @@ ring = "0.17"
 # System Integration
 keyring = "3.0"
 ashpd = "0.12"
+pipewire = "0.8"
 
 # Configuration
 toml = "0.9"

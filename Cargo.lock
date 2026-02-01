@@ -1801,6 +1801,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cosmic-display-stream"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ashpd 0.12.1",
+ "async-trait",
+ "futures",
+ "pipewire",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-test",
+ "tracing",
+]
+
+[[package]]
 name = "cosmic-freedesktop-icons"
 version = "0.4.0"
 source = "git+https://github.com/pop-os/freedesktop-icons#7a61a704f6d1ec41f71cbe766e3cc484858523fa"
@@ -1836,6 +1853,7 @@ name = "cosmic-messages-popup"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-io 2.6.0",
  "async-trait",
  "chrono",
  "clap",

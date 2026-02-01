@@ -1,0 +1,34 @@
+[package]
+name = "cosmic-display-stream"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Extended display streaming to Android tablets for COSMIC Desktop"
+
+[dependencies]
+# xdg-desktop-portal client for screen capture
+ashpd = { workspace = true }
+
+# PipeWire bindings for video stream handling
+pipewire = "0.8"
+
+# Async runtime
+tokio = { workspace = true }
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
