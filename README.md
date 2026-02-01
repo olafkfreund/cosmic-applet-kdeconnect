@@ -266,6 +266,78 @@ These files integrate with COSMIC launcher, providing device-specific actions wi
 
 Planned integration with COSMIC Files will enable dragging files directly onto device icons in the file manager sidebar for instant sharing.
 
+## Web-based Messaging Popup
+
+The **COSMIC Messages Popup** provides a native COSMIC interface for web-based messaging services. When a message notification arrives from your connected Android device, you can open the corresponding web messenger directly in a popup window.
+
+### Supported Messengers
+
+| Service | Package Name | Web URL |
+|---------|--------------|---------|
+| Google Messages | com.google.android.apps.messaging | messages.google.com |
+| WhatsApp | com.whatsapp | web.whatsapp.com |
+| Telegram | org.telegram.messenger | web.telegram.org |
+| Signal | org.thoughtcrime.securesms | signal.link |
+| Discord | com.discord | discord.com/app |
+| Slack | com.Slack | app.slack.com |
+
+### Architecture
+
+```
+cosmic-connect-daemon
+        │
+        ▼
+  ┌──────────────┐    D-Bus     ┌─────────────────────────────┐
+  │ Notification │─────────────▶│   cosmic-messages-popup     │
+  │   Service    │              │                             │
+  └──────────────┘              │  ┌───────────────────────┐  │
+                                │  │     WebView (wry)     │  │
+                                │  │ messages.google.com   │  │
+                                │  │ web.whatsapp.com      │  │
+                                │  │ web.telegram.org      │  │
+                                │  └───────────────────────┘  │
+                                └─────────────────────────────┘
+```
+
+### Usage
+
+**From Command Line:**
+```bash
+# Open messages popup
+cosmic-messages-popup
+
+# Open with specific messenger
+cosmic-messages-popup --messenger google-messages --show
+
+# Run in daemon mode (D-Bus only)
+cosmic-messages-popup --daemon
+```
+
+### Key Features
+
+- **Session Persistence**: WebView sessions are stored per-messenger, maintaining login state
+- **Notification Integration**: Automatically detects messenger from Android notification package
+- **D-Bus Interface**: Accessible from cosmic-connect daemon via `org.cosmicde.MessagesPopup`
+- **Keyboard Shortcuts**: Cmd+1/2/3 to switch between messengers
+- **Configurable Settings**: Enable/disable individual messengers, auto-open behavior
+
+### Configuration
+
+Settings are stored in `~/.config/cosmic/org.cosmicde.MessagesPopup.ron`:
+
+- Enable/disable individual messaging services
+- Popup window size and position
+- Auto-open on notification
+- Sound notification settings
+
+### Why Web-based?
+
+Google Messages RCS has no public API for third-party applications. By using web interfaces:
+- Full RCS messaging support without reverse-engineering
+- Works with any messenger that has a web interface
+- Maintains Google's end-to-end encryption
+- Future-proof as web interfaces are updated
+
 ## Installation
 
 ### NixOS (Flake)

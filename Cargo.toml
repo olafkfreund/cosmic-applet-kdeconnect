@@ -6,6 +6,7 @@ members = [
     "cosmic-connect-daemon",
     "cosmic-connect-manager",
     "cosmic-messages",
+    "cosmic-messages-popup",
 ]
 
 [workspace.package]
