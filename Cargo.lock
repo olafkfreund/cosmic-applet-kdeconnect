@@ -1730,6 +1730,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "cosmic-connect-manager"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "ashpd 0.12.1",
+ "cosmic-connect-protocol",
+ "dirs 5.0.1",
+ "futures",
+ "libcosmic",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml 0.8.2",
+ "tracing",
+ "tracing-subscriber",
+ "zbus 5.13.1",
+]
+
+[[package]]
 name = "cosmic-connect-protocol"
 version = "0.1.0"
 dependencies = [
