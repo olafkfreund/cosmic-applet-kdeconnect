@@ -5,6 +5,7 @@ mod device_config;
 mod diagnostics;
 mod error_handler;
 mod mpris_manager;
+mod notification_image;
 mod notification_listener;
 
 use anyhow::{Context, Result};
@@ -18,6 +19,7 @@ use cosmic_connect_protocol::{
     plugins::{
         audiostream::AudioStreamPluginFactory,
         battery::BatteryPluginFactory,
+        camera::CameraPluginFactory,
         chat::ChatPluginFactory,
         clipboard::ClipboardPluginFactory,
         clipboardhistory::ClipboardHistoryPluginFactory,
@@ -133,10 +135,7 @@ struct Daemon {
     /// Track connection attempts for exponential backoff (device_id -> (last_attempt, failure_count))
     connection_attempts: Arc<RwLock<std::collections::HashMap<String, (std::time::Instant, u32)>>>,
 
-    /// Notification listener for capturing desktop notifications
-    notification_listener: Option<Arc<NotificationListener>>,
-
-    /// Receiver for captured notifications
+    /// Receiver for captured notifications from the notification listener
     notification_receiver: Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<CapturedNotification>>>>,
 }
 
@@ -323,7 +322,6 @@ impl Daemon {
             packet_sender,
             packet_receiver,
             connection_attempts: Arc::new(RwLock::new(std::collections::HashMap::new())),
-            notification_listener: None,
             notification_receiver: Arc::new(tokio::sync::Mutex::new(None)),
         })
     }
@@ -553,6 +551,13 @@ impl Daemon {
             manager
                 .register_factory(Arc::new(ConnectivityReportPluginFactory))
                 .context("Failed to register ConnectivityReport plugin factory")?;
+        }
+
+        if config.plugins.enable_camera {
+            info!("Registering Camera plugin factory");
+            manager
+                .register_factory(Arc::new(CameraPluginFactory))
+                .context("Failed to register Camera plugin factory")?;
         }
 
         info!(
@@ -1379,13 +1384,20 @@ impl Daemon {
         match NotificationListener::new(listener_config, tx).await {
             Ok(listener) => {
                 info!("Notification listener initialized successfully");
-                self.notification_listener = Some(Arc::new(listener));
 
                 // Store receiver for event loop
                 let mut receiver_guard = self.notification_receiver.lock().await;
                 *receiver_guard = Some(rx);
                 drop(receiver_guard);
                 drop(config);
+
+                // Spawn DBus monitoring task
+                // Note: listener is moved into the task, so we don't store it
+                tokio::spawn(async move {
+                    if let Err(e) = listener.listen().await {
+                        error!("Notification listener error: {}", e);
+                    }
+                });
 
                 // Spawn notification forwarding task
                 let device_manager = self.device_manager.clone();
@@ -1428,22 +1440,27 @@ impl Daemon {
                         // Actions are already in the correct format
                         let actions = &notification.actions;
 
-                        // Convert image data if present
-                        let image_data = notification.image_data().map(|_img_data| {
-                            // For now, we don't have the raw bytes, so pass None
-                            // In the future, this could be enhanced to convert ImageData to bytes
-                            None::<&[u8]>
-                        }).unwrap_or(None);
+                        // Process notification image if present
+                        let image_bytes = Self::process_notification_image(&notification).await;
 
                         // Create notification packet using NotificationPlugin
-                        use cosmic_connect_protocol::plugins::notification::NotificationPlugin;
+                        use cosmic_connect_protocol::plugins::notification::{
+                            NotificationPlugin, NotificationUrgency,
+                        };
+
+                        // Map urgency from notification hints
+                        let urgency = Some(NotificationUrgency::from_byte(notification.urgency()));
+
                         let packet = NotificationPlugin::create_desktop_notification_packet(
                             &notification.app_name,
                             &notification.summary,
                             &notification.body,
                             notification.timestamp as i64,
-                            image_data,
+                            image_bytes.as_deref(),
                             &actions,
+                            urgency,
+                            notification.category(),
+                            None, // app_icon - could be enhanced later
                         );
 
                         // Forward to each device that supports notifications
@@ -1486,6 +1503,62 @@ impl Daemon {
         }
 
         Ok(())
+    }
+
+    /// Process notification image from captured notification
+    ///
+    /// Attempts to extract and process an image from the notification, trying:
+    /// 1. Raw image data from `image-data` hint
+    /// 2. Image file path from `image-path` hint
+    ///
+    /// Returns PNG-encoded image bytes if successful, None otherwise.
+    async fn process_notification_image(notification: &CapturedNotification) -> Option<Vec<u8>> {
+        use crate::notification_image::NotificationImage;
+
+        // Try raw image data first
+        if let Some(image_data) = notification.image_data() {
+            match NotificationImage::from_image_data(image_data) {
+                Ok(img) => match img.to_png() {
+                    Ok(png_bytes) => {
+                        debug!(
+                            "Processed notification image from image-data: {} bytes",
+                            png_bytes.len()
+                        );
+                        return Some(png_bytes);
+                    }
+                    Err(e) => {
+                        warn!("Failed to convert image to PNG: {}", e);
+                    }
+                },
+                Err(e) => {
+                    warn!("Failed to process image-data: {}", e);
+                }
+            }
+        }
+
+        // Try image path as fallback
+        if let Some(image_path) = notification.image_path() {
+            match NotificationImage::from_path(image_path) {
+                Ok(img) => match img.to_png() {
+                    Ok(png_bytes) => {
+                        debug!(
+                            "Processed notification image from path {}: {} bytes",
+                            image_path,
+                            png_bytes.len()
+                        );
+                        return Some(png_bytes);
+                    }
+                    Err(e) => {
+                        warn!("Failed to convert image from path to PNG: {}", e);
+                    }
+                },
+                Err(e) => {
+                    trace!("Failed to load image from path {}: {}", image_path, e);
+                }
+            }
+        }
+
+        None
     }
 
     /// Handle a connection event
