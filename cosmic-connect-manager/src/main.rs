@@ -63,6 +63,10 @@ pub enum DeviceAction {
     Ping,
     Find,
     ScreenShare,
+    Lock,
+    Power,
+    Sms,
+    RefreshBattery,
     Settings,
 }
 
@@ -73,6 +77,10 @@ impl DeviceAction {
             "ping" => Some(DeviceAction::Ping),
             "find" => Some(DeviceAction::Find),
             "screen-share" => Some(DeviceAction::ScreenShare),
+            "lock" => Some(DeviceAction::Lock),
+            "power" => Some(DeviceAction::Power),
+            "sms" => Some(DeviceAction::Sms),
+            "refresh-battery" => Some(DeviceAction::RefreshBattery),
             "settings" => Some(DeviceAction::Settings),
             _ => None,
         }
@@ -165,6 +173,7 @@ pub enum Message {
     AddHistoryEvent(HistoryEvent),
     RefreshDevices,
     RefreshMprisPlayers,
+    BatteryStatusLoaded(String, dbus_client::BatteryStatus),
     DaemonEventReceived(DaemonEvent),
     None,
 }
@@ -175,6 +184,7 @@ pub struct CosmicConnectManager {
     dbus_client: Option<DbusClient>,
     devices: HashMap<String, DeviceInfo>,
     device_configs: HashMap<String, DeviceConfig>,
+    battery_status: HashMap<String, dbus_client::BatteryStatus>,
     selected_device: Option<String>,
     _initial_device: Option<String>,
     _initial_action: Option<DeviceAction>,
@@ -841,7 +851,7 @@ impl CosmicConnectManager {
         config: Option<&'a DeviceConfig>,
         is_selected: bool,
     ) -> Element<'a, Message> {
-        let device_icon = icon::from_name(device_icon_name(&device.device_type)).size(32);
+        let device_icon = icon::from_name(device_icon_name(&device.device_type)).size(48);
         let display_name = config
             .and_then(|c| c.nickname.as_deref())
             .unwrap_or(&device.name);
@@ -849,55 +859,146 @@ impl CosmicConnectManager {
         let status_text = connection_status(device);
         let status_badge = text(status_text).size(12);
 
-        let mut info_row = row::with_capacity(2)
+        let mut info_column = column::with_capacity(2)
+            .spacing(theme::active().cosmic().space_xxs())
+            .push(name_text)
+            .push(status_badge);
+
+        if let Some(battery) = self.battery_status.get(device_id) {
+            let battery_icon = if battery.is_charging {
+                "battery-charging-symbolic"
+            } else if battery.level > 80 {
+                "battery-full-symbolic"
+            } else if battery.level > 50 {
+                "battery-good-symbolic"
+            } else if battery.level > 20 {
+                "battery-low-symbolic"
+            } else {
+                "battery-caution-symbolic"
+            };
+
+            let battery_row = row::with_capacity(2)
+                .spacing(theme::active().cosmic().space_xxs())
+                .align_y(Alignment::Center)
+                .push(icon::from_name(battery_icon).size(16))
+                .push(text(format!("{}%", battery.level)).size(12));
+
+            info_column = info_column.push(battery_row);
+        }
+
+        let info_row = row::with_capacity(2)
             .spacing(theme::active().cosmic().space_s())
             .align_y(Alignment::Center)
             .push(device_icon)
-            .push(
-                column::with_capacity(2)
-                    .spacing(theme::active().cosmic().space_xxs())
-                    .push(name_text)
-                    .push(status_badge)
-            );
-
-        if let Some(cfg) = config {
-            if cfg.plugins.enable_battery.unwrap_or(true) {
-                info_row = info_row.push(icon::from_name("battery-symbolic").size(16));
-            }
-        }
+            .push(info_column);
 
         let mut card_content = column::with_capacity(2)
             .spacing(theme::active().cosmic().space_s())
             .push(info_row);
 
         if device.is_connected {
-            let ping_button = button::icon(icon::from_name("network-transmit-receive-symbolic").size(16))
-                .on_press(Message::ExecuteAction(device_id.to_string(), DeviceAction::Ping))
-                .padding(theme::active().cosmic().space_xxs());
+            let ping_button = cosmic::widget::tooltip(
+                button::icon(icon::from_name("network-transmit-receive-symbolic").size(20))
+                    .on_press(Message::ExecuteAction(device_id.to_string(), DeviceAction::Ping))
+                    .padding(theme::active().cosmic().space_xxs())
+                    .class(theme::Button::Icon),
+                "Send ping",
+                cosmic::widget::tooltip::Position::Bottom,
+            );
 
-            let send_file_button = button::icon(icon::from_name("document-send-symbolic").size(16))
-                .on_press(Message::ExecuteAction(device_id.to_string(), DeviceAction::SendFile))
-                .padding(theme::active().cosmic().space_xxs());
+            let send_file_button = cosmic::widget::tooltip(
+                button::icon(icon::from_name("document-send-symbolic").size(20))
+                    .on_press(Message::ExecuteAction(device_id.to_string(), DeviceAction::SendFile))
+                    .padding(theme::active().cosmic().space_xxs())
+                    .class(theme::Button::Icon),
+                "Send file",
+                cosmic::widget::tooltip::Position::Bottom,
+            );
 
-            let find_button = button::icon(icon::from_name("find-location-symbolic").size(16))
-                .on_press(Message::ExecuteAction(device_id.to_string(), DeviceAction::Find))
-                .padding(theme::active().cosmic().space_xxs());
+            let find_button = cosmic::widget::tooltip(
+                button::icon(icon::from_name("find-location-symbolic").size(20))
+                    .on_press(Message::ExecuteAction(device_id.to_string(), DeviceAction::Find))
+                    .padding(theme::active().cosmic().space_xxs())
+                    .class(theme::Button::Icon),
+                "Find device",
+                cosmic::widget::tooltip::Position::Bottom,
+            );
 
-            let actions_row = row::with_capacity(3)
+            let screen_share_button = cosmic::widget::tooltip(
+                button::icon(icon::from_name("video-display-symbolic").size(20))
+                    .on_press(Message::ExecuteAction(device_id.to_string(), DeviceAction::ScreenShare))
+                    .padding(theme::active().cosmic().space_xxs())
+                    .class(theme::Button::Icon),
+                "Screen share",
+                cosmic::widget::tooltip::Position::Bottom,
+            );
+
+            let lock_button = cosmic::widget::tooltip(
+                button::icon(icon::from_name("system-lock-screen-symbolic").size(20))
+                    .on_press(Message::ExecuteAction(device_id.to_string(), DeviceAction::Lock))
+                    .padding(theme::active().cosmic().space_xxs())
+                    .class(theme::Button::Icon),
+                "Lock device",
+                cosmic::widget::tooltip::Position::Bottom,
+            );
+
+            let power_button = cosmic::widget::tooltip(
+                button::icon(icon::from_name("system-shutdown-symbolic").size(20))
+                    .on_press(Message::ExecuteAction(device_id.to_string(), DeviceAction::Power))
+                    .padding(theme::active().cosmic().space_xxs())
+                    .class(theme::Button::Icon),
+                "Shutdown device",
+                cosmic::widget::tooltip::Position::Bottom,
+            );
+
+            let sms_button = cosmic::widget::tooltip(
+                button::icon(icon::from_name("mail-message-new-symbolic").size(20))
+                    .on_press(Message::ExecuteAction(device_id.to_string(), DeviceAction::Sms))
+                    .padding(theme::active().cosmic().space_xxs())
+                    .class(theme::Button::Icon),
+                "Send SMS",
+                cosmic::widget::tooltip::Position::Bottom,
+            );
+
+            let refresh_battery_button = cosmic::widget::tooltip(
+                button::icon(icon::from_name("view-refresh-symbolic").size(20))
+                    .on_press(Message::ExecuteAction(device_id.to_string(), DeviceAction::RefreshBattery))
+                    .padding(theme::active().cosmic().space_xxs())
+                    .class(theme::Button::Icon),
+                "Refresh battery",
+                cosmic::widget::tooltip::Position::Bottom,
+            );
+
+            let primary_actions = row::with_capacity(3)
                 .spacing(theme::active().cosmic().space_xs())
                 .push(ping_button)
                 .push(send_file_button)
                 .push(find_button);
 
-            card_content = card_content.push(actions_row);
+            let secondary_actions = row::with_capacity(5)
+                .spacing(theme::active().cosmic().space_xs())
+                .push(screen_share_button)
+                .push(lock_button)
+                .push(power_button)
+                .push(sms_button)
+                .push(refresh_battery_button);
+
+            let all_actions = column::with_capacity(2)
+                .spacing(theme::active().cosmic().space_xs())
+                .push(primary_actions)
+                .push(secondary_actions);
+
+            card_content = card_content.push(all_actions);
         }
 
         let card_container = container(card_content)
-            .padding(theme::active().cosmic().space_s())
-            .width(Length::Fill);
+            .padding(theme::active().cosmic().space_m())
+            .width(Length::Fill)
+            .class(theme::Container::Card);
 
         let card_button = if is_selected {
             button::custom(card_container)
+                .class(theme::Button::Suggested)
         } else {
             button::custom(card_container)
         };
@@ -964,6 +1065,7 @@ impl Application for CosmicConnectManager {
                 dbus_client: None,
                 devices: HashMap::new(),
                 device_configs: HashMap::new(),
+                battery_status: HashMap::new(),
                 selected_device: initial_device.clone(),
                 _initial_device: initial_device,
                 _initial_action: initial_action,
@@ -1014,8 +1116,34 @@ impl Application for CosmicConnectManager {
                 Task::none()
             }
             Message::DevicesUpdated(devices) => {
-                self.devices = devices;
-                Task::none()
+                if let Some(client) = &self.dbus_client {
+                    let client_clone = client.clone();
+                    let connected_device_ids: Vec<String> = devices
+                        .iter()
+                        .filter(|(_, device)| device.is_connected)
+                        .map(|(id, _)| id.clone())
+                        .collect();
+
+                    self.devices = devices;
+
+                    let battery_tasks: Vec<_> = connected_device_ids
+                        .into_iter()
+                        .map(|device_id| {
+                            let client = client_clone.clone();
+                            cosmic::task::future(async move {
+                                match client.get_battery_status(&device_id).await {
+                                    Ok(status) => Message::BatteryStatusLoaded(device_id, status),
+                                    Err(_) => Message::None,
+                                }
+                            })
+                        })
+                        .collect();
+
+                    Task::batch(battery_tasks)
+                } else {
+                    self.devices = devices;
+                    Task::none()
+                }
             }
             Message::DeviceConfigLoaded(device_id, config) => {
                 self.device_configs.insert(device_id, config);
@@ -1127,10 +1255,59 @@ impl Application for CosmicConnectManager {
                                 Message::None
                             })
                         }
+                        DeviceAction::ScreenShare => {
+                            cosmic::task::future(async move {
+                                if let Err(e) = client.start_screen_share(&device_id, 5000).await {
+                                    tracing::error!("Failed to start screen share: {}", e);
+                                }
+                                Message::None
+                            })
+                        }
+                        DeviceAction::Lock => {
+                            cosmic::task::future(async move {
+                                tracing::info!("Lock device not yet implemented for {}", device_id);
+                                Message::None
+                            })
+                        }
+                        DeviceAction::Power => {
+                            cosmic::task::future(async move {
+                                tracing::info!("Power action not yet implemented for {}", device_id);
+                                Message::None
+                            })
+                        }
+                        DeviceAction::Sms => {
+                            cosmic::task::future(async move {
+                                tracing::info!("SMS not yet implemented for {}", device_id);
+                                Message::None
+                            })
+                        }
+                        DeviceAction::RefreshBattery => {
+                            let device_id_clone = device_id.clone();
+                            cosmic::task::future(async move {
+                                match client.request_battery_update(&device_id).await {
+                                    Ok(_) => {
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                        match client.get_battery_status(&device_id).await {
+                                            Ok(status) => Message::BatteryStatusLoaded(device_id_clone, status),
+                                            Err(e) => {
+                                                tracing::error!("Failed to get battery status: {}", e);
+                                                Message::None
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("Failed to request battery update: {}", e);
+                                        Message::None
+                                    }
+                                }
+                            })
+                        }
                         DeviceAction::SendFile => {
                             Task::none()
                         }
-                        _ => Task::none(),
+                        DeviceAction::Settings => {
+                            Task::none()
+                        }
                     }
                 } else {
                     Task::none()
@@ -1266,6 +1443,10 @@ impl Application for CosmicConnectManager {
             }
             Message::TogglePlugin(plugin_id, enabled) => {
                 self.plugin_states.insert(plugin_id, enabled);
+                Task::none()
+            }
+            Message::BatteryStatusLoaded(device_id, status) => {
+                self.battery_status.insert(device_id, status);
                 Task::none()
             }
             Message::DaemonEventReceived(event) => {

@@ -591,6 +591,47 @@ trait CConnect {
         action: String,
     ) -> zbus::fdo::Result<()>;
 
+    /// Lock remote device
+    async fn lock_device(&self, device_id: &str) -> zbus::fdo::Result<()>;
+
+    /// Power action (shutdown, hibernate, suspend)
+    async fn power_action(&self, device_id: &str, action: &str) -> zbus::fdo::Result<()>;
+
+    /// Wake-on-LAN
+    async fn wake_device(&self, device_id: &str) -> zbus::fdo::Result<()>;
+
+    /// Mute incoming call
+    async fn mute_call(&self, device_id: &str) -> zbus::fdo::Result<()>;
+
+    /// Send SMS
+    async fn send_sms(
+        &self,
+        device_id: &str,
+        phone_number: &str,
+        message: &str,
+    ) -> zbus::fdo::Result<()>;
+
+    /// Start audio stream
+    async fn start_audio_stream(&self, device_id: &str) -> zbus::fdo::Result<()>;
+
+    /// Stop audio stream
+    async fn stop_audio_stream(&self, device_id: &str) -> zbus::fdo::Result<()>;
+
+    /// Start presenter mode
+    async fn start_presenter(&self, device_id: &str) -> zbus::fdo::Result<()>;
+
+    /// Stop presenter mode
+    async fn stop_presenter(&self, device_id: &str) -> zbus::fdo::Result<()>;
+
+    /// Set device volume
+    async fn set_device_volume(&self, device_id: &str, volume: f64) -> zbus::fdo::Result<()>;
+
+    /// Request system info
+    async fn request_system_info(&self, device_id: &str) -> zbus::fdo::Result<()>;
+
+    /// Take screenshot
+    async fn take_screenshot(&self, device_id: &str) -> zbus::fdo::Result<()>;
+
     /// Signal: File transfer complete
     #[zbus(signal)]
     fn transfer_complete(
@@ -1378,6 +1419,114 @@ impl DbusClient {
             .send_mirror_input(device_id, x, y, action)
             .await
             .context("Failed to send mirror input")
+    }
+
+    /// Lock remote device
+    pub async fn lock_device(&self, device_id: &str) -> Result<()> {
+        info!("Locking device {}", device_id);
+        self.proxy
+            .lock_device(device_id)
+            .await
+            .context("Failed to lock device")
+    }
+
+    /// Power action (shutdown, hibernate, suspend)
+    pub async fn power_action(&self, device_id: &str, action: &str) -> Result<()> {
+        info!("Sending power action '{}' to device {}", action, device_id);
+        self.proxy
+            .power_action(device_id, action)
+            .await
+            .context("Failed to send power action")
+    }
+
+    /// Wake-on-LAN
+    pub async fn wake_device(&self, device_id: &str) -> Result<()> {
+        info!("Sending Wake-on-LAN to device {}", device_id);
+        self.proxy
+            .wake_device(device_id)
+            .await
+            .context("Failed to wake device")
+    }
+
+    /// Mute incoming call
+    pub async fn mute_call(&self, device_id: &str) -> Result<()> {
+        info!("Muting call on device {}", device_id);
+        self.proxy
+            .mute_call(device_id)
+            .await
+            .context("Failed to mute call")
+    }
+
+    /// Send SMS
+    pub async fn send_sms(&self, device_id: &str, phone_number: &str, message: &str) -> Result<()> {
+        info!("Sending SMS to {} on device {}", phone_number, device_id);
+        self.proxy
+            .send_sms(device_id, phone_number, message)
+            .await
+            .context("Failed to send SMS")
+    }
+
+    /// Start audio stream
+    pub async fn start_audio_stream(&self, device_id: &str) -> Result<()> {
+        info!("Starting audio stream on device {}", device_id);
+        self.proxy
+            .start_audio_stream(device_id)
+            .await
+            .context("Failed to start audio stream")
+    }
+
+    /// Stop audio stream
+    pub async fn stop_audio_stream(&self, device_id: &str) -> Result<()> {
+        info!("Stopping audio stream on device {}", device_id);
+        self.proxy
+            .stop_audio_stream(device_id)
+            .await
+            .context("Failed to stop audio stream")
+    }
+
+    /// Start presenter mode
+    pub async fn start_presenter(&self, device_id: &str) -> Result<()> {
+        info!("Starting presenter mode on device {}", device_id);
+        self.proxy
+            .start_presenter(device_id)
+            .await
+            .context("Failed to start presenter mode")
+    }
+
+    /// Stop presenter mode
+    pub async fn stop_presenter(&self, device_id: &str) -> Result<()> {
+        info!("Stopping presenter mode on device {}", device_id);
+        self.proxy
+            .stop_presenter(device_id)
+            .await
+            .context("Failed to stop presenter mode")
+    }
+
+    /// Set device volume
+    pub async fn set_device_volume(&self, device_id: &str, volume: f64) -> Result<()> {
+        info!("Setting volume to {} on device {}", volume, device_id);
+        self.proxy
+            .set_device_volume(device_id, volume)
+            .await
+            .context("Failed to set device volume")
+    }
+
+    /// Request system info
+    pub async fn request_system_info(&self, device_id: &str) -> Result<()> {
+        info!("Requesting system info from device {}", device_id);
+        self.proxy
+            .request_system_info(device_id)
+            .await
+            .context("Failed to request system info")
+    }
+
+    /// Take screenshot
+    pub async fn take_screenshot(&self, device_id: &str) -> Result<()> {
+        info!("Taking screenshot on device {}", device_id);
+        self.proxy
+            .take_screenshot(device_id)
+            .await
+            .context("Failed to take screenshot")
     }
 
     /// Get run commands
