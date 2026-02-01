@@ -5,7 +5,7 @@ use cosmic::{
     app::{Core, Task},
     iced::{Alignment, Length, Size},
     theme,
-    widget::{button, column, container, icon, row, scrollable, text, vertical_space},
+    widget::{button, column, container, icon, row, scrollable, text, toggler, vertical_space},
     Application, Element,
 };
 
@@ -123,6 +123,10 @@ pub enum Message {
     MediaNext(String),
     MediaPrevious(String),
     CancelTransfer(String),
+    ClearHistory,
+    ToggleAutoStart(bool),
+    ToggleNotifications(bool),
+    TogglePlugin(String, bool),
     None,
 }
 
@@ -136,6 +140,9 @@ pub struct CosmicConnectManager {
     initial_device: Option<String>,
     initial_action: Option<DeviceAction>,
     dbus_ready: bool,
+    auto_start_enabled: bool,
+    show_notifications: bool,
+    plugin_states: HashMap<String, bool>,
 }
 
 impl CosmicConnectManager {
@@ -202,8 +209,8 @@ impl CosmicConnectManager {
             Page::Devices => self.device_list_view(),
             Page::MediaPlayers => self.media_players_view(),
             Page::Transfers => self.transfers_view(),
-            Page::History => self.placeholder_view("History", "document-open-recent-symbolic"),
-            Page::Settings => self.placeholder_view("Settings", "preferences-system-symbolic"),
+            Page::History => self.history_view(),
+            Page::Settings => self.settings_view(),
         }
     }
 
@@ -493,6 +500,219 @@ impl CosmicConnectManager {
             .into()
     }
 
+    fn history_view(&self) -> Element<Message> {
+        let mut content = column::with_capacity(2)
+            .spacing(theme::active().cosmic().space_m())
+            .padding(theme::active().cosmic().space_m());
+
+        let header = row::with_capacity(2)
+            .spacing(theme::active().cosmic().space_s())
+            .align_y(Alignment::Center)
+            .push(text("Event History").size(18))
+            .push(
+                button::text("Clear")
+                    .on_press(Message::ClearHistory)
+                    .class(theme::Button::Destructive)
+                    .padding(theme::active().cosmic().space_xxs())
+            );
+
+        content = content.push(header);
+
+        let placeholder_events = vec![
+            (
+                "network-wireless-signal-excellent-symbolic",
+                "Device connected",
+                "Pixel 7 Pro",
+                "2 minutes ago"
+            ),
+            (
+                "document-save-symbolic",
+                "File received",
+                "photo.jpg from Pixel 7 Pro",
+                "15 minutes ago"
+            ),
+            (
+                "notification-symbolic",
+                "Notification",
+                "New message from WhatsApp",
+                "1 hour ago"
+            ),
+            (
+                "network-transmit-receive-symbolic",
+                "Ping sent",
+                "Galaxy Tab S9",
+                "3 hours ago"
+            ),
+            (
+                "network-wireless-offline-symbolic",
+                "Device disconnected",
+                "Pixel 7 Pro",
+                "5 hours ago"
+            ),
+            (
+                "document-send-symbolic",
+                "File sent",
+                "report.pdf to Galaxy Tab S9",
+                "Yesterday"
+            ),
+        ];
+
+        if placeholder_events.is_empty() {
+            content = content.push(
+                container(
+                    column::with_capacity(3)
+                        .spacing(theme::active().cosmic().space_s())
+                        .align_x(Alignment::Center)
+                        .push(icon::from_name("document-open-recent-symbolic").size(64))
+                        .push(text("No events yet").size(18))
+                        .push(text("Device activity will appear here").size(14))
+                )
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+            );
+        } else {
+            let events_list = column::with_capacity(placeholder_events.len())
+                .spacing(theme::active().cosmic().space_xs());
+
+            let mut events_list = events_list;
+            for (icon_name, event_type, description, timestamp) in placeholder_events {
+                events_list = events_list.push(self.history_event_item(
+                    icon_name,
+                    event_type,
+                    description,
+                    timestamp,
+                ));
+            }
+
+            content = content.push(events_list);
+        }
+
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
+    fn history_event_item(
+        &self,
+        icon_name: &str,
+        event_type: &str,
+        description: &str,
+        timestamp: &str,
+    ) -> Element<Message> {
+        let event_icon = icon::from_name(icon_name).size(20);
+
+        let event_info = column::with_capacity(2)
+            .spacing(theme::active().cosmic().space_xxs())
+            .push(text(event_type.to_string()).size(14))
+            .push(
+                row::with_capacity(3)
+                    .spacing(theme::active().cosmic().space_xxs())
+                    .align_y(Alignment::Center)
+                    .push(text(description.to_string()).size(12))
+                    .push(text("·").size(12))
+                    .push(text(timestamp.to_string()).size(12))
+            );
+
+        let item_content = row::with_capacity(2)
+            .spacing(theme::active().cosmic().space_s())
+            .align_y(Alignment::Center)
+            .push(event_icon)
+            .push(event_info);
+
+        container(item_content)
+            .padding(theme::active().cosmic().space_s())
+            .width(Length::Fill)
+            .into()
+    }
+
+    fn settings_view(&self) -> Element<Message> {
+        let mut content = column::with_capacity(6)
+            .spacing(theme::active().cosmic().space_m())
+            .padding(theme::active().cosmic().space_m());
+
+        content = content.push(text("General Settings").size(18));
+
+        let general_section = column::with_capacity(3)
+            .spacing(theme::active().cosmic().space_s())
+            .push(
+                row::with_capacity(2)
+                    .spacing(theme::active().cosmic().space_s())
+                    .align_y(Alignment::Center)
+                    .push(text("Auto-start daemon").size(14))
+                    .push(
+                        toggler(self.auto_start_enabled)
+                            .on_toggle(Message::ToggleAutoStart)
+                    )
+            )
+            .push(
+                row::with_capacity(2)
+                    .spacing(theme::active().cosmic().space_s())
+                    .align_y(Alignment::Center)
+                    .push(text("Show notifications").size(14))
+                    .push(
+                        toggler(self.show_notifications)
+                            .on_toggle(Message::ToggleNotifications)
+                    )
+            );
+
+        content = content.push(
+            container(general_section)
+                .padding(theme::active().cosmic().space_s())
+                .width(Length::Fill)
+        );
+
+        content = content.push(vertical_space().height(theme::active().cosmic().space_m()));
+        content = content.push(text("Plugin Settings").size(18));
+
+        let plugins = vec![
+            ("battery", "Battery", "Monitor battery level"),
+            ("clipboard", "Clipboard Sync", "Synchronize clipboard content"),
+            ("notification", "Notifications", "Sync notifications"),
+            ("share", "File Sharing", "Send and receive files"),
+            ("mpris", "Media Controls", "Control media playback"),
+            ("findmyphone", "Find My Phone", "Locate device"),
+            ("ping", "Ping", "Check connection"),
+            ("runcommand", "Run Commands", "Execute remote commands"),
+            ("remotedesktop", "Remote Desktop", "Screen sharing"),
+            ("camera", "Camera", "Webcam streaming"),
+        ];
+
+        let mut plugin_section = column::with_capacity(plugins.len())
+            .spacing(theme::active().cosmic().space_xs());
+
+        for (plugin_id, plugin_name, plugin_desc) in plugins {
+            let is_enabled = self.plugin_states.get(plugin_id).copied().unwrap_or(false);
+
+            let plugin_info = column::with_capacity(2)
+                .spacing(theme::active().cosmic().space_xxs())
+                .push(text(plugin_name).size(14))
+                .push(text(plugin_desc).size(12));
+
+            let plugin_row = row::with_capacity(2)
+                .spacing(theme::active().cosmic().space_s())
+                .align_y(Alignment::Center)
+                .push(plugin_info)
+                .push(
+                    toggler(is_enabled)
+                        .on_toggle(move |enabled| Message::TogglePlugin(plugin_id.to_string(), enabled))
+                );
+
+            plugin_section = plugin_section.push(
+                container(plugin_row)
+                    .padding(theme::active().cosmic().space_s())
+                    .width(Length::Fill)
+            );
+        }
+
+        content = content.push(plugin_section);
+
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
+    }
+
     fn device_card<'a>(
         &self,
         device_id: &'a str,
@@ -587,6 +807,18 @@ impl Application for CosmicConnectManager {
         let initial_device = flags.device.clone();
         let initial_action = flags.action.as_deref().and_then(DeviceAction::from_str);
 
+        let mut plugin_states = HashMap::new();
+        plugin_states.insert("battery".to_string(), true);
+        plugin_states.insert("clipboard".to_string(), true);
+        plugin_states.insert("notification".to_string(), true);
+        plugin_states.insert("share".to_string(), true);
+        plugin_states.insert("mpris".to_string(), true);
+        plugin_states.insert("findmyphone".to_string(), true);
+        plugin_states.insert("ping".to_string(), true);
+        plugin_states.insert("runcommand".to_string(), false);
+        plugin_states.insert("remotedesktop".to_string(), false);
+        plugin_states.insert("camera".to_string(), false);
+
         (
             CosmicConnectManager {
                 core,
@@ -598,6 +830,9 @@ impl Application for CosmicConnectManager {
                 initial_device,
                 initial_action,
                 dbus_ready: false,
+                auto_start_enabled: true,
+                show_notifications: true,
+                plugin_states,
             },
             Task::none(),
         )
@@ -649,6 +884,19 @@ impl Application for CosmicConnectManager {
             Message::MediaNext(_device_id) => Task::none(),
             Message::MediaPrevious(_device_id) => Task::none(),
             Message::CancelTransfer(_transfer_id) => Task::none(),
+            Message::ClearHistory => Task::none(),
+            Message::ToggleAutoStart(enabled) => {
+                self.auto_start_enabled = enabled;
+                Task::none()
+            }
+            Message::ToggleNotifications(enabled) => {
+                self.show_notifications = enabled;
+                Task::none()
+            }
+            Message::TogglePlugin(plugin_id, enabled) => {
+                self.plugin_states.insert(plugin_id, enabled);
+                Task::none()
+            }
             Message::None => Task::none(),
         }
     }
