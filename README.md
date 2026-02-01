@@ -198,6 +198,74 @@ The Manager uses a two-panel layout:
 
 The sidebar provides navigation between devices, while the content area displays context-specific controls based on the selected device and active plugins.
 
+## Camera as Webcam
+
+The **Camera as Webcam** plugin allows you to use your Android device's camera as a virtual webcam on your COSMIC Desktop. This enables video conferencing, streaming, or any application that supports V4L2 video devices.
+
+### System Requirements
+
+- **v4l2loopback** kernel module installed
+- Linux kernel with V4L2 support
+- Connected and paired Android device with camera access granted
+
+### Setup
+
+Load the v4l2loopback kernel module before using this feature:
+
+```bash
+sudo modprobe v4l2loopback exclusive_caps=1
+```
+
+For persistent loading, add `v4l2loopback` to `/etc/modules-load.d/` and configure options in `/etc/modprobe.d/`.
+
+### Supported Resolutions
+
+| Resolution | Aspect Ratio | Use Case |
+|------------|--------------|----------|
+| 480p (640x480) | 4:3 | Low bandwidth, older apps |
+| 720p (1280x720) | 16:9 | Standard video calls |
+| 1080p (1920x1080) | 16:9 | High quality streaming |
+
+### Usage
+
+1. Open the **COSMIC Connect Manager** or panel applet
+2. Select your paired Android device
+3. Navigate to **Camera** controls
+4. Choose resolution and click **Start Webcam**
+5. The virtual camera appears as `/dev/video*` for use in any V4L2-compatible application
+
+## Desktop Device Icons
+
+COSMIC Connect creates desktop integration files for connected devices, allowing quick access to common actions directly from your application launcher or file manager.
+
+### How It Works
+
+When a device is paired, COSMIC Connect generates a `.desktop` file in:
+
+```
+~/.local/share/applications/cosmic-connect-<device-id>.desktop
+```
+
+These files integrate with COSMIC launcher, providing device-specific actions without opening the full manager.
+
+### Available Actions
+
+| Action | Description |
+|--------|-------------|
+| **Send File** | Opens file picker to send files to the device |
+| **Ping** | Sends a ping notification to locate the device |
+| **Find Phone** | Triggers audible ring on the remote device |
+
+### Icon Behavior
+
+- **Created**: When device is first paired
+- **Updated**: When device name or capabilities change
+- **Removed**: When device is unpaired (optional cleanup)
+
+### Future: Drag-and-Drop Support
+
+Planned integration with COSMIC Files will enable dragging files directly onto device icons in the file manager sidebar for instant sharing.
+
 ## Installation
 
 ### NixOS (Flake)

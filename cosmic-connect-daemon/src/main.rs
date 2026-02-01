@@ -1,6 +1,7 @@
 mod config;
 mod cosmic_notifications;
 mod dbus;
+mod desktop_icons;
 mod device_config;
 mod diagnostics;
 mod error_handler;
