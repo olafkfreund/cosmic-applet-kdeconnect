@@ -92,8 +92,9 @@ fn main() -> cosmic::iced::Result {
     let _gtk_handle = gtk_webview::start_gtk_event_loop();
     info!("GTK event loop thread spawned");
 
-    // Create D-Bus channel
-    let (dbus_sender, _) = app::create_dbus_channel();
+    // Create D-Bus channel and store receiver for polling
+    let (dbus_sender, dbus_receiver) = app::create_dbus_channel();
+    app::set_dbus_receiver(dbus_receiver);
 
     // Start D-Bus service in background
     let dbus_sender_clone = dbus_sender.clone();

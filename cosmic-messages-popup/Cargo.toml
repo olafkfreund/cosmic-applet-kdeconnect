@@ -26,6 +26,7 @@ zbus = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
+async-io = "2"
 
 # Serialization
 serde = { workspace = true }

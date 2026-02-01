@@ -12,8 +12,17 @@ use cosmic::iced::keyboard::Key;
 use cosmic::iced::{keyboard, Length, Subscription};
 use cosmic::widget::{self, button, column, container, divider, icon, row, text, toggler};
 use cosmic::{Action, Application, Element};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
+
+/// Global D-Bus receiver for polling in subscription
+static DBUS_RECEIVER: OnceLock<Arc<Mutex<mpsc::Receiver<DbusCommand>>>> = OnceLock::new();
+
+/// Initialize the global D-Bus receiver (call once from main)
+pub fn set_dbus_receiver(rx: mpsc::Receiver<DbusCommand>) {
+    let _ = DBUS_RECEIVER.set(Arc::new(Mutex::new(rx)));
+}
 
 /// Application messages
 #[derive(Debug, Clone)]
@@ -264,11 +273,34 @@ impl Application for MessagesPopup {
             Message::DbusCommand(cmd) => {
                 match cmd {
                     DbusCommand::ShowMessenger(id) => {
+                        debug!("D-Bus: ShowMessenger {}", id);
                         let _ = self.webview_manager.set_current(&id);
                         self.visible = true;
+                        // Show the GTK WebView window
+                        if let Some(url) = self.webview_manager.current_url() {
+                            if let Err(e) = gtk_webview::show_messenger_window(&id, url, &self.config) {
+                                error!("Failed to show WebView window: {}", e);
+                            }
+                        }
                     }
-                    DbusCommand::HidePopup => self.visible = false,
-                    DbusCommand::TogglePopup => self.visible = !self.visible,
+                    DbusCommand::HidePopup => {
+                        debug!("D-Bus: HidePopup");
+                        self.visible = false;
+                        let _ = gtk_webview::hide_all_windows();
+                    }
+                    DbusCommand::TogglePopup => {
+                        debug!("D-Bus: TogglePopup");
+                        self.visible = !self.visible;
+                        if self.visible {
+                            if let Some(messenger_id) = self.webview_manager.current() {
+                                if let Some(url) = self.webview_manager.current_url() {
+                                    let _ = gtk_webview::show_messenger_window(messenger_id, url, &self.config);
+                                }
+                            }
+                        } else {
+                            let _ = gtk_webview::hide_all_windows();
+                        }
+                    }
                     DbusCommand::NotificationReceived(data) => {
                         return Task::done(Action::App(Message::NotificationReceived(data)));
                     }
@@ -320,14 +352,59 @@ impl Application for MessagesPopup {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        // Subscribe to keyboard events
-        keyboard::on_key_press(|key, modifiers| {
-            if modifiers.command() {
-                Some(Message::KeyPressed(key))
-            } else {
-                None
-            }
-        })
+        struct DbusSubscription;
+
+        // D-Bus command subscription using unfold
+        let dbus_sub = Subscription::run_with_id(
+            std::any::TypeId::of::<DbusSubscription>(),
+            cosmic::iced::futures::stream::unfold(false, |initialized| async move {
+                use async_io::Timer;
+
+                if !initialized {
+                    info!("D-Bus subscription starting...");
+                    // Small delay on first run to let D-Bus initialize
+                    Timer::after(std::time::Duration::from_millis(100)).await;
+                    info!("D-Bus receiver available: {}", DBUS_RECEIVER.get().is_some());
+                }
+
+                // Poll for D-Bus commands
+                loop {
+                    if let Some(receiver) = DBUS_RECEIVER.get() {
+                        if let Ok(mut rx) = receiver.try_lock() {
+                            match rx.try_recv() {
+                                Ok(cmd) => {
+                                    info!("Subscription received D-Bus command: {:?}", cmd);
+                                    return Some((Message::DbusCommand(cmd), true));
+                                }
+                                Err(mpsc::error::TryRecvError::Empty) => {
+                                    // No message, sleep and retry
+                                }
+                                Err(mpsc::error::TryRecvError::Disconnected) => {
+                                    error!("D-Bus channel disconnected");
+                                    return None;
+                                }
+                            }
+                        }
+                    } else {
+                        debug!("DBUS_RECEIVER not yet available");
+                    }
+                    // Sleep briefly before polling again (runtime-agnostic)
+                    Timer::after(std::time::Duration::from_millis(50)).await;
+                }
+            }),
+        );
+
+        // Combine with keyboard events
+        Subscription::batch([
+            keyboard::on_key_press(|key, modifiers| {
+                if modifiers.command() {
+                    Some(Message::KeyPressed(key))
+                } else {
+                    None
+                }
+            }),
+            dbus_sub,
+        ])
     }
 }
 

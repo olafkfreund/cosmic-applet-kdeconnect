@@ -185,6 +185,20 @@ fn create_webview_window(
     width: i32,
     height: i32,
 ) -> Result<(gtk::Window, WebView)> {
+    // Create persistent data directory for this messenger's sessions
+    // This stores cookies, local storage, IndexedDB - users only login once!
+    let data_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("cosmic-messages-popup")
+        .join("webview-data")
+        .join(messenger_id);
+
+    // Ensure the directory exists
+    if let Err(e) = std::fs::create_dir_all(&data_dir) {
+        error!("Failed to create WebView data directory: {}", e);
+    }
+    info!("WebView data directory for {}: {:?}", messenger_id, data_dir);
+
     // Create GTK window
     let window = gtk::Window::new(gtk::WindowType::Toplevel);
     window.set_title(title);
@@ -194,14 +208,22 @@ fn create_webview_window(
     // Set window hints for popup-like behavior
     window.set_type_hint(gdk::WindowTypeHint::Dialog);
 
-    // Create a fixed container for the WebView
-    let fixed = gtk::Fixed::new();
-    window.add(&fixed);
+    // Create a Box container that expands to fill the window
+    let container = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    container.set_hexpand(true);
+    container.set_vexpand(true);
+    window.add(&container);
+
+    // Create a WebContext with persistent data directory
+    // This stores cookies, local storage, IndexedDB - users login once!
+    let mut web_context = wry::WebContext::new(Some(data_dir.clone()));
 
     // Build WebView using GTK extension for Wayland support
-    let webview = WebViewBuilder::new()
+    // Note: Don't use with_bounds() - let GTK handle sizing through widget properties
+    let webview = WebViewBuilder::with_web_context(&mut web_context)
         .with_url(url)
         .with_devtools(cfg!(debug_assertions))
+        .with_autoplay(true)
         // Handle new window requests (OAuth popups, etc.)
         .with_new_window_req_handler(|uri: String| {
             debug!("WebView requested new window: {}", uri);
@@ -220,8 +242,19 @@ fn create_webview_window(
             debug!("WebView navigating to: {}", uri);
             true // Allow navigation
         })
-        .build_gtk(&fixed)
+        .build_gtk(&container)
         .context("Failed to build WebView")?;
+
+    // Set all children of the container to expand and fill
+    // The wry WebView adds a widget that needs to expand
+    for child in container.children() {
+        child.set_hexpand(true);
+        child.set_vexpand(true);
+        // If it's a Box, also set the child packing
+        if let Some(parent_box) = child.parent().and_then(|p| p.downcast::<gtk::Box>().ok()) {
+            parent_box.set_child_packing(&child, true, true, 0, gtk::PackType::Start);
+        }
+    }
 
     // Handle window close - hide instead of destroy
     let messenger_id_clone = messenger_id.to_string();
