@@ -102,6 +102,7 @@
 pub mod audio_backend;
 pub mod audiostream;
 pub mod battery;
+pub mod camera;
 pub mod chat;
 pub mod chat_storage;
 pub mod clipboard;

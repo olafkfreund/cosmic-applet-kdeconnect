@@ -61,6 +61,7 @@ default = []
 remotedesktop = ["pipewire", "openh264", "lz4", "image"]
 low_latency = []
 screenshare = ["gstreamer", "gstreamer-app", "gstreamer-video", "image", "ashpd"]
+video = ["cosmic-connect-core/video"]
 
 [dev-dependencies]
 tokio-test = "0.4"

@@ -291,6 +291,10 @@ pub struct PluginConfig {
     /// Enable NetworkShare plugin (SFTP mounting)
     #[serde(default = "default_true")]
     pub enable_networkshare: bool,
+
+    /// Enable Camera plugin (remote camera/webcam access)
+    #[serde(default = "default_false")]
+    pub enable_camera: bool,
 }
 
 /// Storage paths configuration
@@ -451,6 +455,7 @@ impl Default for PluginConfig {
             enable_screenshare: false, // Screen share disabled by default (requires screen capture)
             enable_mousekeyboardshare: false, // Mouse/keyboard share disabled by default (requires input capture)
             enable_networkshare: true,        // SFTP mounting enabled by default
+            enable_camera: false,             // Camera disabled by default (opt-in feature)
         }
     }
 }
