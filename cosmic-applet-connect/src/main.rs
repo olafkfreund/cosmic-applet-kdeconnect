@@ -362,8 +362,7 @@ struct CConnectApplet {
     dbus_client: Option<DbusClient>,
     mpris_players: Vec<String>,
     selected_player: Option<String>,
-    // Settings UI state
-    expanded_device_settings: Option<String>, // Currently expanded device_id
+    // Device configs (used for renaming)
     device_configs: HashMap<String, dbus_client::DeviceConfig>, // Device-specific configs
     // RemoteDesktop settings UI state
     remotedesktop_settings_device: Option<String>, // device_id showing RemoteDesktop settings
@@ -502,8 +501,6 @@ enum FocusTarget {
     /// View mode tab (Devices, History, Transfers) - reserved for future use
     #[allow(dead_code)]
     ViewTab(ViewMode),
-    /// Settings button for device
-    DeviceSettings(usize),
     /// Refresh button
     Refresh,
     /// None - nothing focused
@@ -620,12 +617,7 @@ enum Message {
     ShowTransferQueue,
     LaunchScreenMirror(String), // device_id
 
-    // Settings UI
-    ToggleDeviceSettings(String),                          // device_id
-    SetDevicePluginEnabled(String, String, bool),          // device_id, plugin, enabled
-    ClearDevicePluginOverride(String, String),             // device_id, plugin
-    ResetAllPluginOverrides(String),                       // device_id
-    SetDeviceNotificationPreference(String, dbus_client::NotificationPreference), // device_id, preference
+    // Device config (used for renaming)
     DeviceConfigLoaded(String, dbus_client::DeviceConfig), // device_id, config
     // RemoteDesktop settings
     ShowRemoteDesktopSettings(String), // device_id
@@ -658,6 +650,7 @@ enum Message {
     // Help dialog
     ToggleKeyboardShortcutsHelp,
     OpenManager, // Launch standalone manager window
+    LaunchManager(String), // Launch manager with device_id pre-selected
     // Pinned devices
     ToggleDevicePin(String), // device_id
     // Daemon status
@@ -1040,7 +1033,6 @@ impl cosmic::Application for CConnectApplet {
             dbus_client: None,
             mpris_players: Vec::new(),
             selected_player: None,
-            expanded_device_settings: None,
             device_configs: HashMap::new(),
             remotedesktop_settings_device: None,
             remotedesktop_settings: HashMap::new(),
@@ -1872,172 +1864,6 @@ impl cosmic::Application for CConnectApplet {
                     |_| cosmic::Action::None,
                 )
             }
-            Message::ToggleDeviceSettings(device_id) => {
-                if self.expanded_device_settings.as_ref() == Some(&device_id) {
-                    // Collapse
-                    self.expanded_device_settings = None;
-                    Task::none()
-                } else {
-                    // Expand - fetch config first
-                    self.expanded_device_settings = Some(device_id.clone());
-                    let device_id_for_async = device_id.clone();
-                    let device_id_for_msg = std::sync::Arc::new(device_id.clone());
-                    Task::perform(
-                        async move {
-                            match DbusClient::connect().await {
-                                Ok((client, _)) => {
-                                    client.get_device_config(&device_id_for_async).await
-                                }
-                                Err(e) => {
-                                    tracing::error!("Failed to connect to daemon: {}", e);
-                                    Err(e)
-                                }
-                            }
-                        },
-                        move |result| {
-                            let device_id = (*device_id_for_msg).clone();
-                            match result {
-                                Ok(config) => cosmic::Action::App(Message::DeviceConfigLoaded(
-                                    device_id, config,
-                                )),
-                                Err(e) => {
-                                    tracing::error!("Failed to load device config: {}", e);
-                                    cosmic::Action::App(Message::RefreshDevices)
-                                }
-                            }
-                        },
-                    )
-                }
-            }
-            Message::SetDevicePluginEnabled(device_id, plugin, enabled) => {
-                tracing::info!(
-                    "Setting plugin {} to {} for device {}",
-                    plugin,
-                    if enabled { "enabled" } else { "disabled" },
-                    device_id
-                );
-                let device_id_for_async = device_id.clone();
-                let device_id_for_msg = std::sync::Arc::new(device_id.clone());
-                device_operation_task(device_id, "set plugin enabled", move |client, id| {
-                    let plugin_clone = plugin.clone();
-                    async move {
-                        client
-                            .set_device_plugin_enabled(&id, &plugin_clone, enabled)
-                            .await
-                    }
-                })
-                .chain(Task::perform(
-                    async move {
-                        match DbusClient::connect().await {
-                            Ok((client, _)) => client.get_device_config(&device_id_for_async).await,
-                            Err(e) => Err(e),
-                        }
-                    },
-                    move |result| {
-                        let device_id = (*device_id_for_msg).clone();
-                        match result {
-                            Ok(config) => {
-                                cosmic::Action::App(Message::DeviceConfigLoaded(device_id, config))
-                            }
-                            Err(_) => cosmic::Action::App(Message::RefreshDevices),
-                        }
-                    },
-                ))
-            }
-            Message::ClearDevicePluginOverride(device_id, plugin) => {
-                tracing::info!(
-                    "Clearing plugin override for {} on device {}",
-                    plugin,
-                    device_id
-                );
-                let device_id_for_async = device_id.clone();
-                let device_id_for_msg = std::sync::Arc::new(device_id.clone());
-                device_operation_task(device_id, "clear plugin override", move |client, id| {
-                    let plugin_clone = plugin.clone();
-                    async move {
-                        client
-                            .clear_device_plugin_override(&id, &plugin_clone)
-                            .await
-                    }
-                })
-                .chain(Task::perform(
-                    async move {
-                        match DbusClient::connect().await {
-                            Ok((client, _)) => client.get_device_config(&device_id_for_async).await,
-                            Err(e) => Err(e),
-                        }
-                    },
-                    move |result| {
-                        let device_id = (*device_id_for_msg).clone();
-                        match result {
-                            Ok(config) => {
-                                cosmic::Action::App(Message::DeviceConfigLoaded(device_id, config))
-                            }
-                            Err(_) => cosmic::Action::App(Message::RefreshDevices),
-                        }
-                    },
-                ))
-            }
-            Message::SetDeviceNotificationPreference(device_id, preference) => {
-                tracing::info!(
-                    "Setting notification preference to {:?} for device {}",
-                    preference,
-                    device_id
-                );
-                let device_id_for_async = device_id.clone();
-                let device_id_for_msg = std::sync::Arc::new(device_id.clone());
-                device_operation_task(device_id, "set notification preference", move |client, id| {
-                    async move {
-                        client
-                            .set_device_notification_preference(&id, preference)
-                            .await
-                    }
-                })
-                .chain(Task::perform(
-                    async move {
-                        match DbusClient::connect().await {
-                            Ok((client, _)) => client.get_device_config(&device_id_for_async).await,
-                            Err(e) => Err(e),
-                        }
-                    },
-                    move |result| {
-                        let device_id = (*device_id_for_msg).clone();
-                        match result {
-                            Ok(config) => {
-                                cosmic::Action::App(Message::DeviceConfigLoaded(device_id, config))
-                            }
-                            Err(_) => cosmic::Action::App(Message::RefreshDevices),
-                        }
-                    },
-                ))
-            }
-            Message::ResetAllPluginOverrides(device_id) => {
-                tracing::info!("Resetting all plugin overrides for device {}", device_id);
-                let device_id_for_async = device_id.clone();
-                let device_id_for_msg = std::sync::Arc::new(device_id.clone());
-                device_operation_task(
-                    device_id,
-                    "reset all plugin overrides",
-                    move |client, id| async move { client.reset_all_plugin_overrides(&id).await },
-                )
-                .chain(Task::perform(
-                    async move {
-                        match DbusClient::connect().await {
-                            Ok((client, _)) => client.get_device_config(&device_id_for_async).await,
-                            Err(e) => Err(e),
-                        }
-                    },
-                    move |result| {
-                        let device_id = (*device_id_for_msg).clone();
-                        match result {
-                            Ok(config) => {
-                                cosmic::Action::App(Message::DeviceConfigLoaded(device_id, config))
-                            }
-                            Err(_) => cosmic::Action::App(Message::RefreshDevices),
-                        }
-                    },
-                ))
-            }
             Message::DeviceConfigLoaded(device_id, config) => {
                 tracing::debug!("Device config loaded for {}", device_id);
                 self.device_configs.insert(device_id, config);
@@ -2298,6 +2124,17 @@ impl cosmic::Application for CConnectApplet {
             Message::OpenManager => {
                 // Launch the standalone manager window
                 if let Err(e) = std::process::Command::new("cosmic-connect-manager").spawn() {
+                    tracing::error!("Failed to launch manager: {}", e);
+                }
+                Task::none()
+            }
+            Message::LaunchManager(device_id) => {
+                // Launch the manager with a device pre-selected
+                if let Err(e) = std::process::Command::new("cosmic-connect-manager")
+                    .arg("--device")
+                    .arg(&device_id)
+                    .spawn()
+                {
                     tracing::error!("Failed to launch manager: {}", e);
                 }
                 Task::none()
@@ -4457,19 +4294,6 @@ impl CConnectApplet {
         .spacing(SPACE_M)
         .padding(SPACE_M);
 
-        // Settings (Plugins)
-        if let Some(config) = config {
-            // Reusing device_settings_panel but we might want to hide its header
-            // For now, let's just include it.
-            content = content.push(self.device_settings_panel(device_id, device, config));
-        } else {
-            content = content.push(
-                container(text("Loading settings..."))
-                    .width(Length::Fill)
-                    .align_x(Horizontal::Center),
-            );
-        }
-
         content.into()
     }
 
@@ -4484,8 +4308,7 @@ impl CConnectApplet {
         // Check if this device is focused for keyboard navigation
         let is_focused = matches!(&self.focus_target,
             FocusTarget::Device(idx) |
-            FocusTarget::DeviceAction(idx, _) |
-            FocusTarget::DeviceSettings(idx)
+            FocusTarget::DeviceAction(idx, _)
             if *idx == device_index
         );
 
@@ -4591,16 +4414,6 @@ impl CConnectApplet {
         .spacing(SPACE_S)
         .padding(SPACE_M)
         .width(Length::Fill);
-
-        // Add settings panel if this device is expanded
-        if self.expanded_device_settings.as_ref() == Some(device_id) {
-            if let Some(config) = self.device_configs.get(device_id) {
-                content = content.push(
-                    container(self.device_settings_panel(device_id, device, config))
-                        .padding(Padding::from([0.0, 0.0, 0.0, 48.0 + SPACE_S])),
-                );
-            }
-        }
 
         // Add RemoteDesktop settings panel if active
         if self.remotedesktop_settings_device.as_ref() == Some(device_id) {
@@ -4900,18 +4713,18 @@ impl CConnectApplet {
             }
         }
 
-        // Settings button (for paired devices)
+        // Device details and manager button (for paired devices)
         if device.is_paired() {
-            actions = actions.push(action_button_with_tooltip(
-                "emblem-system-symbolic",
-                "Plugin settings",
-                Message::ToggleDeviceSettings(device_id.to_string()),
-            ));
-
             actions = actions.push(action_button_with_tooltip(
                 "document-properties-symbolic",
                 "Device Details",
                 Message::ShowDeviceDetails(device_id.to_string()),
+            ));
+
+            actions = actions.push(action_button_with_tooltip(
+                "preferences-system-symbolic",
+                "Open Manager",
+                Message::LaunchManager(device_id.to_string()),
             ));
         }
 
@@ -5107,16 +4920,16 @@ impl CConnectApplet {
         // Settings section
         if device.is_paired() {
             menu_items.push(menu_item(
-                "emblem-system-symbolic",
-                "Plugin settings",
-                Message::ToggleDeviceSettings(device_id.to_string()),
+                "document-properties-symbolic",
+                "Device details",
+                Message::ShowDeviceDetails(device_id.to_string()),
                 cosmic::theme::Button::MenuItem,
             ));
 
             menu_items.push(menu_item(
-                "document-properties-symbolic",
-                "Device details",
-                Message::ShowDeviceDetails(device_id.to_string()),
+                "preferences-system-symbolic",
+                "Open Manager",
+                Message::LaunchManager(device_id.to_string()),
                 cosmic::theme::Button::MenuItem,
             ));
 
@@ -5151,270 +4964,6 @@ impl CConnectApplet {
             .width(Length::Fill)
             .class(cosmic::theme::Container::Secondary)
             .into()
-    }
-
-    /// Builds the device settings panel UI
-    fn device_settings_panel<'a>(
-        &'a self,
-        device_id: &str,
-        device: &'a Device,
-        config: &'a dbus_client::DeviceConfig,
-    ) -> Element<'a, Message> {
-        use cosmic::widget::{horizontal_space, toggler};
-
-        // Count overrides for display
-        let override_count = config.count_plugin_overrides();
-
-        // Header with close button
-        let mut header_row = row![cosmic::widget::text::body("Plugin Settings"),]
-            .spacing(SPACE_S)
-            .align_y(cosmic::iced::Alignment::Center);
-
-        // Add override count badge if any overrides exist
-        if override_count > 0 {
-            header_row = header_row.push(
-                text(format!(
-                    "({} override{})",
-                    override_count,
-                    if override_count == 1 { "" } else { "s" }
-                ))
-                .size(ICON_XS),
-            );
-        }
-
-        let header = row![
-            header_row,
-            horizontal_space(),
-            cosmic::widget::tooltip(
-                button::icon(icon::from_name("window-close-symbolic").size(ICON_14))
-                    .on_press(Message::ToggleDeviceSettings(device_id.to_string()))
-                    .padding(SPACE_XXS),
-                "Close settings",
-                cosmic::widget::tooltip::Position::Bottom,
-            )
-        ]
-        .width(Length::Fill)
-        .align_y(cosmic::iced::Alignment::Center);
-
-        // Renaming UI
-        let rename_section = if self.renaming_device.as_deref() == Some(device_id) {
-            row![
-                cosmic::widget::text_input("Nickname", &self.nickname_input)
-                    .on_input(Message::UpdateNicknameInput)
-                    .width(Length::Fill),
-                if self
-                    .pending_operations
-                    .contains(&(device_id.to_string(), OperationType::SaveNickname))
-                {
-                    cosmic::widget::tooltip(
-                        button::icon(icon::from_name("process-working-symbolic").size(ICON_S))
-                            .padding(SPACE_XS),
-                        "Saving...",
-                        cosmic::widget::tooltip::Position::Bottom,
-                    )
-                } else {
-                    cosmic::widget::tooltip(
-                        button::icon(icon::from_name("emblem-ok-symbolic").size(ICON_S))
-                            .on_press(Message::SaveNickname(device_id.to_string()))
-                            .padding(SPACE_XS),
-                        "Save nickname",
-                        cosmic::widget::tooltip::Position::Bottom,
-                    )
-                },
-                cosmic::widget::tooltip(
-                    button::icon(icon::from_name("process-stop-symbolic").size(ICON_S))
-                        .on_press(Message::CancelRenaming)
-                        .padding(SPACE_XS),
-                    "Cancel renaming",
-                    cosmic::widget::tooltip::Position::Bottom,
-                ),
-            ]
-            .spacing(SPACE_S)
-            .align_y(cosmic::iced::Alignment::Center)
-        } else {
-            row![
-                text(
-                    config
-                        .nickname
-                        .as_deref()
-                        .unwrap_or(&device.info.device_name)
-                )
-                .size(ICON_14)
-                .width(Length::Fill),
-                cosmic::widget::tooltip(
-                    button::icon(icon::from_name("document-edit-symbolic").size(ICON_14))
-                        .on_press(Message::StartRenaming(device_id.to_string()))
-                        .padding(SPACE_XXS),
-                    "Edit nickname",
-                    cosmic::widget::tooltip::Position::Bottom,
-                )
-            ]
-            .spacing(SPACE_S)
-            .align_y(cosmic::iced::Alignment::Center)
-        };
-
-        // Notification preference section
-        let notification_pref_section = {
-            use dbus_client::NotificationPreference;
-
-            let current_pref = config.notification_preference;
-
-            row![
-                icon::from_name("notification-symbolic").size(ICON_S),
-                cosmic::widget::text::caption("Notifications:").width(Length::Fill),
-                cosmic::widget::dropdown(
-                    &["All", "Important Only", "None"],
-                    Some(match current_pref {
-                        NotificationPreference::All => 0,
-                        NotificationPreference::Important => 1,
-                        NotificationPreference::None => 2,
-                    }),
-                    {
-                        let device_id = device_id.to_string();
-                        move |idx| {
-                            let pref = match idx {
-                                0 => NotificationPreference::All,
-                                1 => NotificationPreference::Important,
-                                _ => NotificationPreference::None,
-                            };
-                            Message::SetDeviceNotificationPreference(device_id.clone(), pref)
-                        }
-                    }
-                )
-            ]
-            .spacing(SPACE_S)
-            .align_y(cosmic::iced::Alignment::Center)
-        };
-
-        // Build plugin list
-        let mut plugin_list = column![].spacing(SPACE_S);
-
-        for plugin_meta in PLUGINS {
-            // Check if device supports this plugin
-            let is_supported = device.has_incoming_capability(plugin_meta.capability)
-                || device.has_outgoing_capability(plugin_meta.capability);
-
-            // Get current state (device override or global)
-            let plugin_enabled = config.get_plugin_enabled(plugin_meta.id);
-            let has_override = config.has_plugin_override(plugin_meta.id);
-
-            // Build plugin row
-            let mut plugin_row = row![
-                icon::from_name(plugin_meta.icon).size(ICON_S),
-                cosmic::widget::text::caption(plugin_meta.name).width(Length::Fill),
-            ]
-            .spacing(SPACE_S)
-            .align_y(cosmic::iced::Alignment::Center);
-
-            // Toggle switch (only enabled for supported plugins)
-            if is_supported {
-                plugin_row = plugin_row.push(toggler(plugin_enabled).on_toggle({
-                    let device_id = device_id.to_string();
-                    let plugin_id = plugin_meta.id.to_string();
-                    move |enabled| {
-                        Message::SetDevicePluginEnabled(
-                            device_id.clone(),
-                            plugin_id.clone(),
-                            enabled,
-                        )
-                    }
-                }));
-            } else {
-                // Show disabled toggle for unsupported plugins with tooltip
-                plugin_row = plugin_row.push(cosmic::widget::tooltip(
-                    toggler(plugin_enabled),
-                    cosmic::widget::text::caption(format!(
-                        "{} is not supported by this device",
-                        plugin_meta.name
-                    )),
-                    cosmic::widget::tooltip::Position::Top,
-                ));
-            }
-
-            // Reset button (only shown if override exists)
-            if has_override {
-                plugin_row = plugin_row.push(cosmic::widget::tooltip(
-                    button::icon(icon::from_name("edit-undo-symbolic").size(ICON_XS))
-                        .on_press({
-                            let device_id = device_id.to_string();
-                            let plugin_id = plugin_meta.id.to_string();
-                            Message::ClearDevicePluginOverride(device_id, plugin_id)
-                        })
-                        .padding(SPACE_XXS),
-                    "Reset to default",
-                    cosmic::widget::tooltip::Position::Bottom,
-                ));
-            }
-
-            // Settings button (only for RemoteDesktop, FileSync, RunCommand, and Camera plugins)
-            if plugin_meta.id == "remotedesktop" {
-                plugin_row = plugin_row.push(cosmic::widget::tooltip(
-                    button::icon(icon::from_name("emblem-system-symbolic").size(ICON_XS))
-                        .on_press(Message::ShowRemoteDesktopSettings(device_id.to_string()))
-                        .padding(SPACE_XXS),
-                    "Configure Remote Input",
-                    cosmic::widget::tooltip::Position::Bottom,
-                ));
-            } else if plugin_meta.id == "filesync" {
-                plugin_row = plugin_row.push(cosmic::widget::tooltip(
-                    button::icon(icon::from_name("emblem-system-symbolic").size(ICON_XS))
-                        .on_press(Message::ShowFileSyncSettings(device_id.to_string()))
-                        .padding(SPACE_XXS),
-                    "Configure File Sync",
-                    cosmic::widget::tooltip::Position::Bottom,
-                ));
-            } else if plugin_meta.id == "runcommand" {
-                plugin_row = plugin_row.push(cosmic::widget::tooltip(
-                    button::icon(icon::from_name("emblem-system-symbolic").size(ICON_XS))
-                        .on_press(Message::ShowRunCommandSettings(device_id.to_string()))
-                        .padding(SPACE_XXS),
-                    "Configure Run Commands",
-                    cosmic::widget::tooltip::Position::Bottom,
-                ));
-            } else if plugin_meta.id == "camera" {
-                plugin_row = plugin_row.push(cosmic::widget::tooltip(
-                    button::icon(icon::from_name("emblem-system-symbolic").size(ICON_XS))
-                        .on_press(Message::ShowCameraSettings(device_id.to_string()))
-                        .padding(SPACE_XXS),
-                    "Configure Camera",
-                    cosmic::widget::tooltip::Position::Bottom,
-                ));
-            }
-
-            // Add to list (grey out if not supported)
-            if is_supported {
-                plugin_list = plugin_list.push(plugin_row);
-            } else {
-                // Grey out unsupported plugins (just show them dimmed)
-                plugin_list = plugin_list.push(plugin_row);
-            }
-        }
-
-        // Footer with reset all button (only enabled if there are overrides)
-        let footer = if override_count > 0 {
-            button::text("Reset All Overrides")
-                .on_press(Message::ResetAllPluginOverrides(device_id.to_string()))
-                .padding(SPACE_S)
-        } else {
-            button::text("Reset All Overrides").padding(SPACE_S)
-        };
-
-        // Combine everything
-        container(
-            column![
-                header,
-                rename_section,
-                divider::horizontal::default(),
-                notification_pref_section,
-                divider::horizontal::default(),
-                scrollable(plugin_list).height(Length::Fixed(200.0)),
-                divider::horizontal::default(),
-                footer,
-            ]
-            .spacing(SPACE_S),
-        )
-        .padding(SPACE_M)
-        .into()
     }
 
     /// FileSync settings view
@@ -6440,9 +5989,6 @@ impl CConnectApplet {
             } else if self.remotedesktop_settings_device.is_some() {
                 self.remotedesktop_settings_device = None;
                 return Task::none();
-            } else if self.expanded_device_settings.is_some() {
-                self.expanded_device_settings = None;
-                return Task::none();
             } else if self.view_mode == ViewMode::History {
                 self.view_mode = ViewMode::Devices;
                 return Task::none();
@@ -6466,7 +6012,7 @@ impl CConnectApplet {
                     ))),
                     "," => match self.get_settings_device_id() {
                         Some(id) => cosmic::task::message(cosmic::Action::App(
-                            Message::ToggleDeviceSettings(id),
+                            Message::LaunchManager(id),
                         )),
                         None => {
                             cosmic::task::message(cosmic::Action::App(Message::ShowNotification(
@@ -6523,8 +6069,7 @@ impl CConnectApplet {
             for i in 0..device_count {
                 elements.push(FocusTarget::Device(i));
                 elements.push(FocusTarget::DeviceAction(i, 0)); // Ping
-                elements.push(FocusTarget::DeviceAction(i, 1)); // Send file
-                elements.push(FocusTarget::DeviceSettings(i));
+                elements.push(FocusTarget::DeviceAction(i, 1)); // Send file / other actions
             }
         }
 
@@ -6583,9 +6128,7 @@ impl CConnectApplet {
     /// Extract device index from current focus target if applicable
     fn focused_device_index(&self) -> Option<usize> {
         match &self.focus_target {
-            FocusTarget::Device(idx)
-            | FocusTarget::DeviceAction(idx, _)
-            | FocusTarget::DeviceSettings(idx) => Some(*idx),
+            FocusTarget::Device(idx) | FocusTarget::DeviceAction(idx, _) => Some(*idx),
             _ => None,
         }
     }
@@ -6635,7 +6178,6 @@ impl CConnectApplet {
             FocusTarget::DeviceAction(idx, action) if *action > 0 => {
                 FocusTarget::DeviceAction(*idx, action - 1)
             }
-            FocusTarget::DeviceSettings(idx) => FocusTarget::DeviceAction(*idx, 1),
             FocusTarget::MprisControl(player, ctrl) => match ctrl.as_str() {
                 "next" => FocusTarget::MprisControl(player.clone(), "play".into()),
                 "play" => FocusTarget::MprisControl(player.clone(), "prev".into()),
@@ -6650,7 +6192,6 @@ impl CConnectApplet {
     fn focus_right(&mut self) -> Task<Message> {
         self.focus_target = match &self.focus_target {
             FocusTarget::DeviceAction(idx, 0) => FocusTarget::DeviceAction(*idx, 1),
-            FocusTarget::DeviceAction(idx, 1) => FocusTarget::DeviceSettings(*idx),
             FocusTarget::Device(idx) => FocusTarget::DeviceAction(*idx, 0),
             FocusTarget::MprisControl(player, ctrl) => match ctrl.as_str() {
                 "prev" => FocusTarget::MprisControl(player.clone(), "play".into()),
@@ -6672,9 +6213,7 @@ impl CConnectApplet {
         };
 
         let message = match &self.focus_target {
-            FocusTarget::Device(idx) | FocusTarget::DeviceSettings(idx) => {
-                get_device_id(*idx).map(Message::ToggleDeviceSettings)
-            }
+            FocusTarget::Device(idx) => get_device_id(*idx).map(Message::ShowDeviceDetails),
             FocusTarget::DeviceAction(idx, 0) => get_device_id(*idx).map(Message::SendPing),
             FocusTarget::DeviceAction(idx, 1) => get_device_id(*idx).map(Message::SendFile),
             FocusTarget::DeviceAction(_, _) => None,
