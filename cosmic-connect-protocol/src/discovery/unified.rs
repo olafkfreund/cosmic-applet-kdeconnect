@@ -209,7 +209,7 @@ impl UnifiedDiscoveryService {
         // Stop TCP service
         if self.config.enable_tcp {
             let mut tcp_service = self.tcp_service.write().await;
-            tcp_service.stop().await;
+            let _ = tcp_service.stop().await;
         }
 
         // Stop Bluetooth service if available

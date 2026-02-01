@@ -190,6 +190,7 @@ impl NotificationImage {
     /// Get the image dimensions
     ///
     /// Returns the (width, height) of the processed image.
+    #[allow(dead_code)]
     pub fn dimensions(&self) -> (u32, u32) {
         (self.image.width(), self.image.height())
     }

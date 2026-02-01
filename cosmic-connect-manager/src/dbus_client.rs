@@ -1450,6 +1450,7 @@ pub struct ReconnectingClient {
 
 impl ReconnectingClient {
     /// Create a new reconnecting client
+    #[allow(dead_code)]
     pub async fn new() -> Result<Self> {
         let (client, event_rx) = DbusClient::connect().await?;
         client.start_signal_listener().await?;
@@ -1497,6 +1498,7 @@ impl ReconnectingClient {
     }
 
     /// Receive the next daemon event
+    #[allow(dead_code)]
     pub async fn recv_event(&mut self) -> Option<DaemonEvent> {
         self.event_rx.recv().await
     }

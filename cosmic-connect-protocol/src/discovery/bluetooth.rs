@@ -66,6 +66,7 @@ impl Default for BluetoothDiscoveryConfig {
 /// Scans for paired Bluetooth devices that may run CConnect
 pub struct BluetoothDiscoveryService {
     /// BlueZ session
+    #[allow(dead_code)]
     session: Option<Session>,
 
     /// Bluetooth adapter

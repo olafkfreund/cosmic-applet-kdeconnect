@@ -2557,7 +2557,7 @@ impl Daemon {
                         *count += 1;
 
                         // Try to connect
-                        let mgr = connection_manager.read().await;
+                        let _mgr = connection_manager.read().await;
                         // Need to extract SocketAddr from TransportAddress if it's TCP
                         // DiscoveryService usually returns TransportAddress::Tcp for UDP discovery results
                         if let cosmic_connect_protocol::transport::TransportAddress::Tcp(addr) =
@@ -2720,7 +2720,7 @@ impl Daemon {
 
         // Stop discovery service
         if let Some(mut discovery) = self.discovery_service.take() {
-            discovery.stop().await;
+            let _ = discovery.stop().await;
         }
 
         // Stop transport manager or connection manager

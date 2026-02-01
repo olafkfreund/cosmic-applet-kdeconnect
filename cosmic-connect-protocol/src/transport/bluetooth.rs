@@ -64,6 +64,7 @@ pub struct BluetoothConnection {
     stream: Stream,
 
     /// Remote Bluetooth address
+    #[allow(dead_code)]
     remote_address: Address,
 
     /// Remote Bluetooth address as string
@@ -368,6 +369,7 @@ impl std::fmt::Debug for BluetoothListener {
 /// devices can discover and connect to us via `createRfcommSocketToServiceRecord()`.
 pub struct BluetoothProfileService {
     /// BlueZ session
+    #[allow(dead_code)]
     session: Session,
 
     /// Profile handle (keeps the profile registered)
@@ -481,6 +483,7 @@ pub struct BluetoothTransportFactory {
     channel: u8,
 
     /// Service UUID (for reference/logging)
+    #[allow(dead_code)]
     service_uuid: Uuid,
 }
 

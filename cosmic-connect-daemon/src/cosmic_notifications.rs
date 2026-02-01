@@ -11,7 +11,8 @@ use zbus::Connection;
 
 /// Notification metadata stored for action callbacks
 #[derive(Debug, Clone)]
-struct NotificationMetadata {
+#[allow(dead_code)]
+pub(crate) struct NotificationMetadata {
     /// Notification ID
     pub id: String,
     /// Associated links
@@ -74,6 +75,7 @@ impl NotificationBuilder {
     ///
     /// Converts HTML to freedesktop-safe subset: <b>, <i>, <u>, <a>
     /// Strips all other tags and dangerous attributes.
+    #[allow(dead_code)]
     fn sanitize_html(html: &str) -> String {
         // Simple HTML sanitizer for freedesktop notification spec
         // Allowed tags: <b>, <i>, <u>, <a href="...">
@@ -111,6 +113,7 @@ impl NotificationBuilder {
     /// Set rich HTML body text
     ///
     /// Automatically sanitizes HTML to freedesktop-safe subset.
+    #[allow(dead_code)]
     pub fn rich_body(mut self, html: impl Into<String>) -> Self {
         self.body = Self::sanitize_html(&html.into());
         self
@@ -120,6 +123,7 @@ impl NotificationBuilder {
     ///
     /// Sets the image-data hint for displaying an image in the notification.
     /// Image data should be in ARGB32 format.
+    #[allow(dead_code)]
     pub fn image_data(mut self, image_bytes: Vec<u8>, width: i32, height: i32) -> Self {
         use zbus::zvariant::{Array, StructureBuilder, Value};
 
@@ -369,6 +373,7 @@ impl CosmicNotifier {
     /// Send a rich notification from a device
     ///
     /// Supports HTML content, images, and links.
+    #[allow(dead_code)]
     pub async fn notify_rich_from_device(
         &self,
         notification_id: &str,
@@ -741,6 +746,7 @@ impl CosmicNotifier {
     /// Open a notification link
     ///
     /// Opens the URL in the default browser when a link action is triggered.
+    #[allow(dead_code)]
     pub async fn open_notification_link(
         &self,
         notification_id: u32,
@@ -761,6 +767,7 @@ impl CosmicNotifier {
     }
 
     /// Get notification metadata by ID
+    #[allow(dead_code)]
     pub fn get_metadata(&self, notification_id: u32) -> Option<NotificationMetadata> {
         self.metadata
             .read()

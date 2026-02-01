@@ -112,7 +112,7 @@ impl cosmic::Application for CosmicMessages {
         }
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<'_, Message> {
         let tabs = widget::row::with_children(vec![
             button::text("Google Messages")
                 .on_press(Message::SwitchMessenger(MessengerType::GoogleMessages))

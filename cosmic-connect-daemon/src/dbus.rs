@@ -408,8 +408,8 @@ impl CConnectInterface {
 
         // Spawn the pairing request on the Tokio runtime
         // This is needed because zbus uses its own executor that isn't Tokio
-        let device_id_clone = device_id.clone();
-        let result = self
+        let _device_id_clone = device_id.clone();
+        let _result = self
             .tokio_handle
             .spawn(async move {
                 let pairing_service = pairing_service.read().await;
@@ -898,7 +898,7 @@ impl CConnectInterface {
         info!("DBus: WakeDevice called for {}", device_id);
 
         let device_manager = self.device_manager.read().await;
-        let device = device_manager
+        let _device = device_manager
             .get_device(&device_id)
             .ok_or_else(|| zbus::fdo::Error::Failed(format!("Device not found: {}", device_id)))?;
 
@@ -3480,6 +3480,7 @@ impl DbusServer {
     }
 
     /// Emit a device_removed signal
+    #[allow(dead_code)]
     pub async fn emit_device_removed(&self, device_id: &str) -> Result<()> {
         let object_server = self.connection.object_server();
         let iface_ref = object_server

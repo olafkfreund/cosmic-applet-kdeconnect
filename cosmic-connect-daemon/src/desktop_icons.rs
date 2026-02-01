@@ -14,6 +14,7 @@ use crate::device_config::DeviceConfig;
 /// Get the icon name based on device type
 ///
 /// Returns symbolic icon names from the freedesktop icon theme spec
+#[allow(dead_code)]
 fn get_device_icon(device_type: DeviceType) -> &'static str {
     match device_type {
         DeviceType::Phone => "phone-symbolic",
@@ -37,6 +38,7 @@ fn get_device_icon(device_type: DeviceType) -> &'static str {
 /// # Returns
 ///
 /// String containing the complete .desktop file content
+#[allow(dead_code)]
 pub fn generate_desktop_entry(device: &Device, config: Option<&DeviceConfig>) -> String {
     let device_name = config
         .and_then(|c| c.nickname.as_ref())
@@ -100,6 +102,7 @@ Exec=cosmic-connect-manager --select-device {device_id} --tab files
 /// # Returns
 ///
 /// PathBuf to the desktop file location
+#[allow(dead_code)]
 pub fn get_desktop_icon_path(device_id: &str) -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     let applications_dir = PathBuf::from(home)
@@ -123,6 +126,7 @@ pub fn get_desktop_icon_path(device_id: &str) -> PathBuf {
 /// # Returns
 ///
 /// Result indicating success or failure
+#[allow(dead_code)]
 pub fn save_desktop_icon(device_id: &str, content: &str) -> Result<()> {
     let desktop_path = get_desktop_icon_path(device_id);
 
@@ -152,6 +156,7 @@ pub fn save_desktop_icon(device_id: &str, content: &str) -> Result<()> {
 /// # Returns
 ///
 /// Result indicating success or failure
+#[allow(dead_code)]
 pub fn remove_desktop_icon(device_id: &str) -> Result<()> {
     let desktop_path = get_desktop_icon_path(device_id);
 
@@ -179,6 +184,7 @@ pub fn remove_desktop_icon(device_id: &str) -> Result<()> {
 /// # Returns
 ///
 /// Result indicating success or failure
+#[allow(dead_code)]
 pub fn update_desktop_icon(device: &Device, config: Option<&DeviceConfig>) -> Result<()> {
     let content = generate_desktop_entry(device, config);
     save_desktop_icon(&device.info.device_id, &content)?;
@@ -199,6 +205,7 @@ pub fn update_desktop_icon(device: &Device, config: Option<&DeviceConfig>) -> Re
 /// # Returns
 ///
 /// Result indicating success or failure
+#[allow(dead_code)]
 pub fn sync_desktop_icon(device: &Device, config: Option<&DeviceConfig>) -> Result<()> {
     if device.is_paired() {
         update_desktop_icon(device, config)?;

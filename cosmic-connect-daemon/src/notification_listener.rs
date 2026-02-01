@@ -149,6 +149,7 @@ pub struct CapturedNotification {
 /// Provides convenient access to all rich content fields from notification hints.
 /// All fields are optional as hints may not be present.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct RichNotificationData {
     /// Urgency level: 0=low, 1=normal, 2=critical
     pub urgency: u8,
@@ -208,6 +209,7 @@ impl CapturedNotification {
     }
 
     /// Get desktop entry name
+    #[allow(dead_code)]
     pub fn desktop_entry(&self) -> Option<&str> {
         self.hints.get("desktop-entry").and_then(|v| match v {
             HintValue::String(s) => Some(s.as_str()),
@@ -216,6 +218,7 @@ impl CapturedNotification {
     }
 
     /// Get image data if present
+    #[allow(dead_code)]
     pub fn image_data(&self) -> Option<&ImageData> {
         self.hints.get("image-data").and_then(|v| match v {
             HintValue::ImageData(img) => Some(img),
@@ -240,6 +243,7 @@ impl CapturedNotification {
     }
 
     /// Get sound file path if present
+    #[allow(dead_code)]
     pub fn sound_file(&self) -> Option<&str> {
         self.hints.get("sound-file").and_then(|v| match v {
             HintValue::String(s) => Some(s.as_str()),
@@ -248,6 +252,7 @@ impl CapturedNotification {
     }
 
     /// Check if actions have icons
+    #[allow(dead_code)]
     pub fn action_icons(&self) -> bool {
         self.hints
             .get("action-icons")
@@ -262,6 +267,7 @@ impl CapturedNotification {
     ///
     /// Provides a convenient way to access all rich content fields
     /// in a single structured format.
+    #[allow(dead_code)]
     pub fn rich_data(&self) -> RichNotificationData {
         RichNotificationData {
             urgency: self.urgency(),

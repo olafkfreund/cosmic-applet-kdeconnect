@@ -83,11 +83,13 @@ impl PinnedDevicesConfig {
     }
 
     /// Add a device to pinned list
+    #[allow(dead_code)]
     pub fn pin_device(&mut self, device_id: String) {
         self.pinned_devices.insert(device_id);
     }
 
     /// Remove a device from pinned list
+    #[allow(dead_code)]
     pub fn unpin_device(&mut self, device_id: &str) {
         self.pinned_devices.remove(device_id);
     }

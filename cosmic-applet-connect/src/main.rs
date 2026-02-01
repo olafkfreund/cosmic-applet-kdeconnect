@@ -128,16 +128,17 @@ fn main() -> cosmic::iced::Result {
 }
 
 /// Plugin metadata for UI display
+#[allow(dead_code)]
 struct PluginMetadata {
     id: &'static str,
     name: &'static str,
-    #[allow(dead_code)]
     description: &'static str,
     icon: &'static str,
     capability: &'static str,
 }
 
 /// Available plugins with their metadata
+#[allow(dead_code)]
 const PLUGINS: &[PluginMetadata] = &[
     PluginMetadata {
         id: "ping",
@@ -326,6 +327,7 @@ struct TransferState {
 #[derive(Debug, Clone)]
 struct ReceivedFile {
     filename: String,
+    #[allow(dead_code)]
     device_id: String,
     device_name: String,
     timestamp: std::time::Instant,
@@ -435,7 +437,9 @@ struct CConnectApplet {
     camera_stats: HashMap<String, CameraStats>,          // device_id -> stream statistics
     v4l2loopback_available: bool,                        // Whether v4l2loopback kernel module is loaded
     // Onboarding state
+    #[allow(dead_code)]
     show_onboarding: bool,
+    #[allow(dead_code)]
     onboarding_step: u8,
     last_screen_share_stats_poll: Option<std::time::Instant>, // Last time we polled screen share stats
     // Settings window state
@@ -541,6 +545,7 @@ struct CameraStats {
 
 /// System information from remote device
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct SystemInfo {
     cpu_usage: f64,
     memory_usage: f64,
@@ -1686,11 +1691,6 @@ impl cosmic::Application for CConnectApplet {
                         }
                     });
                 }
-                Task::none()
-            }
-            Message::ScreenshotReceived(_device_id, _image_data) => {
-                // TODO: Save and display screenshot
-                tracing::info!("ScreenshotReceived not yet implemented");
                 Task::none()
             }
             Message::ScreenshotReceived(_device_id, _image_data) => {
@@ -4239,7 +4239,7 @@ impl CConnectApplet {
         };
 
         let device = &device_state.device;
-        let config = self.device_configs.get(device_id);
+        let _config = self.device_configs.get(device_id);
 
         let header = row![
             cosmic::widget::tooltip(
@@ -4284,7 +4284,7 @@ impl CConnectApplet {
         ]
         .spacing(SPACE_S);
 
-        let mut content = column![
+        let content = column![
             header,
             container(info_card)
                 .padding(SPACE_M)

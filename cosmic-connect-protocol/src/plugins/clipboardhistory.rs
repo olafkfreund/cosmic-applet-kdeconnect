@@ -426,6 +426,7 @@ pub struct ClipboardHistoryPlugin {
     sqlite_storage: Option<ClipboardSqliteStorage>,
 
     /// Configuration
+    #[allow(dead_code)]
     config: ClipboardHistoryConfig,
 }
 

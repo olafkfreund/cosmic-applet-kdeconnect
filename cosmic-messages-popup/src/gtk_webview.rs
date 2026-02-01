@@ -39,6 +39,7 @@ pub enum GtkCommand {
     /// Close a window
     Close { messenger_id: String },
     /// Shutdown the GTK thread
+    #[allow(dead_code)]
     Shutdown,
 }
 

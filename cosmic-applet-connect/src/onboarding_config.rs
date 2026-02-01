@@ -46,6 +46,7 @@ impl AppletConfig {
     }
 
     /// Save configuration to file
+    #[allow(dead_code)]
     pub fn save(&self) -> Result<()> {
         let config_path = Self::config_path();
 
@@ -63,6 +64,7 @@ impl AppletConfig {
     }
 
     /// Mark onboarding as complete and save
+    #[allow(dead_code)]
     pub fn complete_onboarding(&mut self) -> Result<()> {
         self.onboarding_complete = true;
         self.save()

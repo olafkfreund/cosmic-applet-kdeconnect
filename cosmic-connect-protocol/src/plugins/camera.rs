@@ -419,7 +419,7 @@ impl CameraPlugin {
         );
 
         // Parse resolution (format: "1280x720")
-        let (width, height) = resolution
+        let (_width, _height) = resolution
             .split_once('x')
             .and_then(|(w, h)| {
                 let width = w.parse::<u32>().ok()?;
@@ -488,7 +488,7 @@ impl CameraPlugin {
     }
 
     /// Handle incoming camera frame
-    async fn handle_camera_frame(&self, packet: &Packet, device: &Device) -> Result<()> {
+    async fn handle_camera_frame(&self, _packet: &Packet, device: &Device) -> Result<()> {
         debug!("Received camera frame from {}", device.name());
 
         #[cfg(feature = "video")]

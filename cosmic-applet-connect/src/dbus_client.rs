@@ -220,6 +220,7 @@ pub struct PlayerState {
 
 impl DeviceConfig {
     /// Get whether a plugin is enabled (considering device override vs global)
+    #[allow(dead_code)]
     pub fn get_plugin_enabled(&self, plugin: &str) -> bool {
         match plugin {
             "ping" => self.plugins.enable_ping.unwrap_or(true),
@@ -235,6 +236,7 @@ impl DeviceConfig {
     }
 
     /// Check if a plugin has a device-specific override
+    #[allow(dead_code)]
     pub fn has_plugin_override(&self, plugin: &str) -> bool {
         match plugin {
             "ping" => self.plugins.enable_ping.is_some(),
@@ -250,6 +252,7 @@ impl DeviceConfig {
     }
 
     /// Count how many plugin overrides this device has
+    #[allow(dead_code)]
     pub fn count_plugin_overrides(&self) -> usize {
         let mut count = 0;
         if self.plugins.enable_ping.is_some() {
@@ -344,6 +347,7 @@ pub enum DaemonEvent {
     /// Screen share requested by remote device
     ScreenShareRequested { device_id: String },
     /// Screen share cursor position update
+    #[allow(dead_code)]
     ScreenShareCursorUpdate {
         device_id: String,
         x: i32,
@@ -351,6 +355,7 @@ pub enum DaemonEvent {
         visible: bool,
     },
     /// Screen share annotation received
+    #[allow(dead_code)]
     ScreenShareAnnotation {
         device_id: String,
         annotation_type: String,
@@ -1014,6 +1019,7 @@ impl DbusClient {
     }
 
     /// Connect to a device at a specific address
+    #[allow(dead_code)]
     pub async fn connect_to_address(&self, address: &str) -> Result<()> {
         debug!("Connecting to address: {}", address);
         self.proxy
@@ -1253,6 +1259,7 @@ impl DbusClient {
     }
 
     /// Get device configuration (plugin settings)
+    #[allow(dead_code)]
     pub async fn get_device_config(&self, device_id: &str) -> Result<DeviceConfig> {
         debug!("Getting device config for {}", device_id);
         let json = self
@@ -1270,6 +1277,7 @@ impl DbusClient {
     /// * `device_id` - Device ID
     /// * `plugin` - Plugin name (e.g., "ping", "battery", "remotedesktop")
     /// * `enabled` - Enable or disable the plugin
+    #[allow(dead_code)]
     pub async fn set_device_plugin_enabled(
         &self,
         device_id: &str,
@@ -1293,6 +1301,7 @@ impl DbusClient {
     /// # Arguments
     /// * `device_id` - Device ID
     /// * `plugin` - Plugin name
+    #[allow(dead_code)]
     pub async fn clear_device_plugin_override(&self, device_id: &str, plugin: &str) -> Result<()> {
         info!(
             "Clearing plugin override for {} on device {}",
@@ -1308,6 +1317,7 @@ impl DbusClient {
     ///
     /// # Arguments
     /// * `device_id` - Device ID
+    #[allow(dead_code)]
     pub async fn reset_all_plugin_overrides(&self, device_id: &str) -> Result<()> {
         info!("Resetting all plugin overrides for device {}", device_id);
         self.proxy
@@ -1414,6 +1424,7 @@ impl DbusClient {
     }
 
     /// Set notification preference for a device
+    #[allow(dead_code)]
     pub async fn set_device_notification_preference(
         &self,
         device_id: &str,
@@ -1571,6 +1582,7 @@ impl DbusClient {
     ///
     /// # Returns
     /// List of device IDs that are paired, reachable, and have share capability
+    #[allow(dead_code)]
     pub async fn list_open_capable_devices(&self) -> Result<Vec<String>> {
         debug!("Listing open-capable devices");
         self.open_proxy

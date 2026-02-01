@@ -176,8 +176,8 @@ pub struct CosmicConnectManager {
     devices: HashMap<String, DeviceInfo>,
     device_configs: HashMap<String, DeviceConfig>,
     selected_device: Option<String>,
-    initial_device: Option<String>,
-    initial_action: Option<DeviceAction>,
+    _initial_device: Option<String>,
+    _initial_action: Option<DeviceAction>,
     dbus_ready: bool,
     auto_start_enabled: bool,
     show_notifications: bool,
@@ -186,11 +186,11 @@ pub struct CosmicConnectManager {
     active_transfers: HashMap<String, TransferInfo>,
     completed_transfers: Vec<CompletedTransfer>,
     history_events: Vec<HistoryEvent>,
-    event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<DaemonEvent>>,
+    _event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<DaemonEvent>>,
 }
 
 impl CosmicConnectManager {
-    fn sidebar_view(&self) -> Element<Message> {
+    fn sidebar_view(&self) -> Element<'_, Message> {
         let pages = [
             Page::Devices,
             Page::MediaPlayers,
@@ -248,7 +248,7 @@ impl CosmicConnectManager {
         .into()
     }
 
-    fn content_view(&self) -> Element<Message> {
+    fn content_view(&self) -> Element<'_, Message> {
         match self.active_page {
             Page::Devices => self.device_list_view(),
             Page::MediaPlayers => self.media_players_view(),
@@ -258,6 +258,7 @@ impl CosmicConnectManager {
         }
     }
 
+    #[allow(dead_code)]
     fn placeholder_view(&self, title: &'static str, icon_name: &'static str) -> Element<'static, Message> {
         container(
             column::with_capacity(2)
@@ -274,7 +275,7 @@ impl CosmicConnectManager {
         .into()
     }
 
-    fn device_list_view(&self) -> Element<Message> {
+    fn device_list_view(&self) -> Element<'_, Message> {
         let mut connected_devices = Vec::new();
         let mut available_devices = Vec::new();
         let mut offline_devices = Vec::new();
@@ -339,7 +340,7 @@ impl CosmicConnectManager {
             .into()
     }
 
-    fn media_players_view(&self) -> Element<Message> {
+    fn media_players_view(&self) -> Element<'_, Message> {
         let mut sections = column::with_capacity(4)
             .spacing(theme::active().cosmic().space_m())
             .padding(theme::active().cosmic().space_m());
@@ -371,7 +372,7 @@ impl CosmicConnectManager {
             .into()
     }
 
-    fn media_player_card_with_state(&self, player_id: &str, state: Option<&dbus_client::PlayerState>) -> Element<Message> {
+    fn media_player_card_with_state(&self, player_id: &str, state: Option<&dbus_client::PlayerState>) -> Element<'_, Message> {
         let player_icon = icon::from_name("multimedia-player-symbolic").size(48);
 
         let (player_name, track_info_text, play_pause_icon) = if let Some(state) = state {
@@ -438,6 +439,7 @@ impl CosmicConnectManager {
             .into()
     }
 
+    #[allow(dead_code)]
     fn media_player_card(&self, player_id: &str, player_name: &str) -> Element<'static, Message> {
         let player_icon = icon::from_name("multimedia-player-symbolic").size(48);
         let name_text = text(player_name.to_string()).size(16);
@@ -483,7 +485,7 @@ impl CosmicConnectManager {
             .into()
     }
 
-    fn transfers_view(&self) -> Element<Message> {
+    fn transfers_view(&self) -> Element<'_, Message> {
         let mut content = column::with_capacity(4)
             .spacing(theme::active().cosmic().space_m())
             .padding(theme::active().cosmic().space_m());
@@ -575,7 +577,7 @@ impl CosmicConnectManager {
         progress: u8,
         speed: &str,
         is_active: bool,
-    ) -> Element<Message> {
+    ) -> Element<'_, Message> {
         let file_icon = icon::from_name(icon_name).size(24);
         let filename_text = text(filename.to_string()).size(14);
 
@@ -622,7 +624,7 @@ impl CosmicConnectManager {
         icon_name: &str,
         size: &str,
         time: &str,
-    ) -> Element<Message> {
+    ) -> Element<'_, Message> {
         let file_icon = icon::from_name(icon_name).size(20);
         let filename_text = text(filename.to_string()).size(14);
         let size_text = text(size.to_string()).size(12);
@@ -644,7 +646,7 @@ impl CosmicConnectManager {
             .into()
     }
 
-    fn history_view(&self) -> Element<Message> {
+    fn history_view(&self) -> Element<'_, Message> {
         let mut content = column::with_capacity(2)
             .spacing(theme::active().cosmic().space_m())
             .padding(theme::active().cosmic().space_m());
@@ -718,7 +720,7 @@ impl CosmicConnectManager {
         event_type: &str,
         description: &str,
         timestamp: &str,
-    ) -> Element<Message> {
+    ) -> Element<'_, Message> {
         let event_icon = icon::from_name(icon_name).size(20);
 
         let event_info = column::with_capacity(2)
@@ -745,7 +747,7 @@ impl CosmicConnectManager {
             .into()
     }
 
-    fn settings_view(&self) -> Element<Message> {
+    fn settings_view(&self) -> Element<'_, Message> {
         let mut content = column::with_capacity(6)
             .spacing(theme::active().cosmic().space_m())
             .padding(theme::active().cosmic().space_m());
@@ -963,8 +965,8 @@ impl Application for CosmicConnectManager {
                 devices: HashMap::new(),
                 device_configs: HashMap::new(),
                 selected_device: initial_device.clone(),
-                initial_device,
-                initial_action,
+                _initial_device: initial_device,
+                _initial_action: initial_action,
                 dbus_ready: false,
                 auto_start_enabled: true,
                 show_notifications: true,
@@ -973,7 +975,7 @@ impl Application for CosmicConnectManager {
                 active_transfers: HashMap::new(),
                 completed_transfers: Vec::new(),
                 history_events: Vec::new(),
-                event_rx: None,
+                _event_rx: None,
             },
             connect_task,
         )
@@ -983,11 +985,11 @@ impl Application for CosmicConnectManager {
         cosmic::iced::Subscription::none()
     }
 
-    fn header_start(&self) -> Vec<Element<Self::Message>> {
+    fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
         vec![]
     }
 
-    fn view(&self) -> Element<Self::Message> {
+    fn view(&self) -> Element<'_, Self::Message> {
         let sidebar = self.sidebar_view();
         let content = scrollable(self.content_view())
             .width(Length::Fill)
