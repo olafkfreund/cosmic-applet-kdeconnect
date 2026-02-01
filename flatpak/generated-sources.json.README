@@ -1,0 +1,52 @@
+# Generated Sources File
+
+This directory requires a `generated-sources.json` file for building the Flatpak.
+
+## Why is this file missing?
+
+The `generated-sources.json` file contains checksums and URLs for all Cargo dependencies. It's generated from `Cargo.lock` and should not be committed to version control because:
+
+1. It's derived from `Cargo.lock` (which IS committed)
+2. It's large (can be several MB)
+3. It changes with every dependency update
+4. It can be regenerated automatically
+
+## How to generate it
+
+Before building the Flatpak, run:
+
+```bash
+# Clone the flatpak-builder-tools
+git clone https://github.com/flatpak/flatpak-builder-tools.git /tmp/flatpak-tools
+
+# Generate from project root
+python3 /tmp/flatpak-tools/cargo/flatpak-cargo-generator.py \
+  Cargo.lock \
+  -o flatpak/generated-sources.json
+```
+
+This creates the file with all necessary Cargo dependency information.
+
+## Alternative: Use the script
+
+You can also use this one-liner from the project root:
+
+```bash
+curl -s https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py | \
+  python3 - Cargo.lock -o flatpak/generated-sources.json
+```
+
+## For CI/CD
+
+In GitHub Actions or other CI systems:
+
+```yaml
+- name: Generate Flatpak Cargo sources
+  run: |
+    git clone https://github.com/flatpak/flatpak-builder-tools.git /tmp/tools
+    python3 /tmp/tools/cargo/flatpak-cargo-generator.py \
+      Cargo.lock \
+      -o flatpak/generated-sources.json
+```
+
+See **[FLATPAK.md](FLATPAK.md)** for complete build instructions.

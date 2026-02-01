@@ -77,3 +77,11 @@ dev-certs/
 *.db
 *.sqlite
 *.sqlite3
+
+# Flatpak
+flatpak/generated-sources.json
+flatpak/.flatpak-builder/
+flatpak/build-dir/
+flatpak/repo/
+*.flatpak
+*.flatpakref

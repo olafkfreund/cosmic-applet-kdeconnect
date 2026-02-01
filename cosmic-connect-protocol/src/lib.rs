@@ -3,6 +3,7 @@
 //! This library provides a pure Rust implementation of the CConnect protocol,
 //! enabling device synchronization and communication between computers and mobile devices.
 
+pub mod auth;
 pub mod bluetooth_connection_manager;
 pub mod connection;
 pub mod device;

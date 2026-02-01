@@ -179,8 +179,15 @@
           RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
         };
 
-        # Package definition - use the one from nix/package.nix
-        packages.default = pkgs.callPackage ./nix/package.nix { };
+        # Package definitions
+        packages = {
+          # Default package - use the flake-optimized version
+          default = pkgs.callPackage ./nix/package.nix { };
+
+          # nixpkgs-compatible package for submission
+          # Note: Requires manual hash updates before use
+          nixpkgs = pkgs.callPackage ./nix/pkgs/cosmic-connect.nix { };
+        };
 
         # Apps for running
         apps.default = flake-utils.lib.mkApp {

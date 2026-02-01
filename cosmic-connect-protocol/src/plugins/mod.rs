@@ -122,6 +122,7 @@ pub mod mpris;
 pub mod mpris_backend;
 pub mod networkshare;
 pub mod notification;
+pub mod phoneauth;
 pub mod ping;
 pub mod power;
 pub mod presenter;

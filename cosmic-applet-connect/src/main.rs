@@ -3587,6 +3587,11 @@ impl CConnectApplet {
                         cosmic::widget::text::body("Open Manager").width(Length::FillPortion(3)),
                     ]
                     .spacing(SPACE_S),
+                    row![
+                        cosmic::widget::text::body("F1 or ?").width(Length::FillPortion(2)),
+                        cosmic::widget::text::body("Show this help dialog").width(Length::FillPortion(3)),
+                    ]
+                    .spacing(SPACE_S),
                     divider::horizontal::light(),
                     cosmic::widget::text::title4("Navigation"),
                     row![
@@ -4498,24 +4503,35 @@ impl CConnectApplet {
 
         // Add drop zone indicator when dragging files
         if show_drop_zone {
+            // Enhanced drop zone with better visual feedback
             content = content.push(
                 container(
-                    row![
-                        icon::from_name("document-save-symbolic").size(ICON_S),
-                        cosmic::widget::text::body("Drop file here"),
+                    column![
+                        icon::from_name("document-send-symbolic").size(ICON_L),
+                        cosmic::widget::text::body("Drop file here").size(ICON_S),
+                        cosmic::widget::text::caption("Release to send to this device")
+                            .size(ICON_XS),
                     ]
                     .spacing(SPACE_S)
-                    .align_y(cosmic::iced::Alignment::Center),
+                    .align_x(Horizontal::Center),
                 )
-                .padding(SPACE_S)
+                .padding(SPACE_M)
                 .width(Length::Fill)
                 .align_x(Horizontal::Center)
-                .class(cosmic::theme::Container::Secondary),
+                .class(if is_drag_target {
+                    cosmic::theme::Container::Primary
+                } else {
+                    cosmic::theme::Container::Secondary
+                }),
             );
         }
 
-        // Apply focus/drag indicator styling
-        let container_class = if is_drag_target || is_focused {
+        // Apply focus/drag indicator styling with enhanced visual feedback
+        let container_class = if is_focused {
+            // Focused state - use Primary for keyboard navigation emphasis
+            cosmic::theme::Container::Primary
+        } else if is_drag_target {
+            // Drag target state - use Primary for drop zone emphasis
             cosmic::theme::Container::Primary
         } else {
             cosmic::theme::Container::Card
@@ -6029,6 +6045,18 @@ impl CConnectApplet {
                 return cosmic::task::message(cosmic::Action::Cosmic(
                     cosmic::app::Action::Surface(destroy_popup(id)),
                 ));
+            }
+        }
+
+        // F1 key for help
+        if let cosmic::iced::keyboard::Key::Named(cosmic::iced::keyboard::key::Named::F1) = key {
+            return cosmic::task::message(cosmic::Action::App(Message::ToggleKeyboardShortcutsHelp));
+        }
+
+        // Question mark for help (? key)
+        if let cosmic::iced::keyboard::Key::Character(c) = &key {
+            if c.as_str() == "?" && !modifiers.control() && !modifiers.alt() {
+                return cosmic::task::message(cosmic::Action::App(Message::ToggleKeyboardShortcutsHelp));
             }
         }
 
