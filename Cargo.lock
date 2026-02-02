@@ -1813,7 +1813,7 @@ dependencies = [
 [[package]]
 name = "cosmic-connect-core"
 version = "0.1.0"
-source = "git+https://github.com/olafkfreund/cosmic-connect-core.git?branch=main#278ee7c07b931b90be35ddb30ab3211a85791d98"
+source = "git+https://github.com/olafkfreund/cosmic-connect-core.git?branch=main#e8a7b43684950650ece86106cd4a7c63835a4e98"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4431,7 +4431,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -10511,7 +10511,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
