@@ -110,6 +110,7 @@ rustPlatform.buildRustPackage rec {
     gst_all_1.gst-plugins-base
     gst_all_1.gst-plugins-good
     gst_all_1.gst-plugins-bad
+    gst_all_1.gst-plugins-ugly # H.264 codec support
     # Opus codec for audio streaming
     libopus
   ];
@@ -235,7 +236,17 @@ rustPlatform.buildRustPackage rec {
 
   # Wrap binaries with required runtime library paths
   # COSMIC apps need wayland, libGL, and other graphics libraries at runtime
-  postFixup = ''
+  # The daemon needs GStreamer plugin paths for screenshare functionality
+  postFixup = let
+    gstPluginPath = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
+      gst_all_1.gstreamer
+      gst_all_1.gst-plugins-base
+      gst_all_1.gst-plugins-good
+      gst_all_1.gst-plugins-bad
+      gst_all_1.gst-plugins-ugly
+      pipewire # Contains pipewiresrc element
+    ];
+  in ''
     wrapProgram $out/bin/cosmic-applet-connect \
       --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath [
         wayland
@@ -252,6 +263,15 @@ rustPlatform.buildRustPackage rec {
         libGL
         libglvnd
         mesa
+      ]}"
+
+    # Wrap daemon with GStreamer plugin paths for screenshare capture
+    wrapProgram $out/bin/cosmic-connect-daemon \
+      --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${gstPluginPath}" \
+      --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath [
+        pipewire
+        gst_all_1.gstreamer
+        gst_all_1.gst-plugins-base
       ]}"
   '';
 
