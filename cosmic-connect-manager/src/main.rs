@@ -5,7 +5,7 @@ use cosmic::{
     app::{Core, Task},
     iced::{Alignment, Length, Size},
     theme,
-    widget::{button, column, container, icon, row, scrollable, text, toggler, vertical_space},
+    widget::{button, column, container, horizontal_space, icon, row, scrollable, text, toggler, vertical_space},
     Application, Element,
 };
 
@@ -1013,17 +1013,19 @@ impl CosmicConnectManager {
         let general_section = column::with_capacity(3)
             .spacing(theme::active().cosmic().space_s())
             .push(
-                row::with_capacity(2)
+                row::with_capacity(3)
                     .spacing(theme::active().cosmic().space_s())
                     .align_y(Alignment::Center)
                     .push(text("Auto-start daemon").size(14))
+                    .push(horizontal_space())
                     .push(toggler(self.auto_start_enabled).on_toggle(Message::ToggleAutoStart)),
             )
             .push(
-                row::with_capacity(2)
+                row::with_capacity(3)
                     .spacing(theme::active().cosmic().space_s())
                     .align_y(Alignment::Center)
                     .push(text("Show notifications").size(14))
+                    .push(horizontal_space())
                     .push(toggler(self.show_notifications).on_toggle(Message::ToggleNotifications)),
             );
 
@@ -1064,10 +1066,11 @@ impl CosmicConnectManager {
                 .push(text(plugin_name).size(14))
                 .push(text(plugin_desc).size(12));
 
-            let plugin_row = row::with_capacity(2)
+            let plugin_row = row::with_capacity(3)
                 .spacing(theme::active().cosmic().space_s())
                 .align_y(Alignment::Center)
                 .push(plugin_info)
+                .push(horizontal_space())
                 .push(toggler(is_enabled).on_toggle(move |enabled| {
                     Message::TogglePlugin(plugin_id.to_string(), enabled)
                 }));
