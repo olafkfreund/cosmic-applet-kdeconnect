@@ -1813,12 +1813,13 @@ dependencies = [
 [[package]]
 name = "cosmic-connect-core"
 version = "0.1.0"
-source = "git+https://github.com/olafkfreund/cosmic-connect-core.git?branch=main#ac4ae97021682d836225a7e769b2b3c5e4c59de2"
+source = "git+https://github.com/olafkfreund/cosmic-connect-core.git?branch=main#278ee7c07b931b90be35ddb30ab3211a85791d98"
 dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
  "hex",
+ "image",
  "once_cell",
  "openh264",
  "pem",
@@ -1839,6 +1840,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uniffi",
+ "url",
  "uuid",
  "v4l",
  "webpki-roots 0.26.11",
@@ -4429,7 +4431,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -10365,7 +10367,7 @@ dependencies = [
  "js-sys",
  "log",
  "naga",
- "parking_lot 0.12.5",
+ "parking_lot 0.11.2",
  "profiling",
  "raw-window-handle",
  "smallvec",
@@ -10393,7 +10395,7 @@ dependencies = [
  "log",
  "naga",
  "once_cell",
- "parking_lot 0.12.5",
+ "parking_lot 0.11.2",
  "profiling",
  "raw-window-handle",
  "rustc-hash 1.1.0",
@@ -10434,7 +10436,7 @@ dependencies = [
  "ndk-sys 0.5.0+25.2.9519653",
  "objc",
  "once_cell",
- "parking_lot 0.12.5",
+ "parking_lot 0.11.2",
  "profiling",
  "range-alloc",
  "raw-window-handle",
@@ -10509,7 +10511,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
