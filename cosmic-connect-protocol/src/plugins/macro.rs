@@ -119,17 +119,33 @@
 //!
 //! ## Supported Actions
 //!
+//! ### Currently Implemented
+//!
 //! - `notify` - Send notification (params: title, message)
 //! - `run_command` - Execute command via RunCommand plugin (params: command, args)
 //! - `wait` - Delay execution (params: seconds)
 //! - `send_file` - Send file via Share plugin (params: path)
 //! - `set_clipboard` - Set clipboard content (params: content)
 //!
-//! Future actions (TODO):
-//! - `if_device_connected` - Conditional based on device presence
-//! - `if_time_between` - Conditional based on time range
-//! - `loop` - Repeat steps
-//! - `parallel` - Execute steps concurrently
+//! ### Planned Future Actions
+//!
+//! The following actions are planned for future implementation:
+//!
+//! - `if_device_connected` - Conditional execution based on device presence
+//!   - Checks if a specific device is currently connected
+//!   - Allows branching logic in macro workflows
+//!
+//! - `if_time_between` - Conditional execution based on time range
+//!   - Executes steps only during specified time windows
+//!   - Useful for time-based automation rules
+//!
+//! - `loop` - Repeat steps multiple times
+//!   - Supports fixed iteration count or conditional loops
+//!   - Includes safety limits to prevent infinite loops
+//!
+//! - `parallel` - Execute multiple steps concurrently
+//!   - Runs independent steps simultaneously for efficiency
+//!   - Includes proper synchronization and error handling
 //!
 //! ## Security
 //!

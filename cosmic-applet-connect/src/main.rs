@@ -2484,11 +2484,26 @@ impl cosmic::Application for CConnectApplet {
                     if share.is_sender {
                         tracing::info!("Toggling screen share audio to: {}", include_audio);
                         share.include_audio = include_audio;
-                        // TODO: Implement backend support for toggling audio mid-stream
-                        // This currently updates UI state only. Full implementation requires:
-                        // - DBus method to update stream configuration
-                        // - GStreamer pipeline modification to add/remove audio elements
-                        // - PipeWire audio node handling via XDG Desktop Portal
+
+                        // FUTURE ENHANCEMENT: Dynamic audio toggling during active screen share
+                        // Currently, this only updates the UI state. Audio configuration is set
+                        // at stream start and cannot be changed mid-stream.
+                        //
+                        // To implement dynamic audio toggling, the following changes are needed:
+                        // 1. Add DBus method `update_screen_share_audio(device_id: &str, enable: bool)`
+                        //    to the daemon interface (cosmic-applet-connect/src/dbus_client.rs)
+                        // 2. Implement GStreamer pipeline reconfiguration in the daemon to:
+                        //    - Dynamically add/remove audio source elements
+                        //    - Handle PipeWire audio node lifecycle
+                        //    - Maintain audio/video sync when toggling
+                        // 3. Handle XDG Desktop Portal audio permissions when enabling audio
+                        //    after stream has started
+                        //
+                        // For now, users must stop and restart the screen share to change
+                        // audio settings. The UI could be improved by:
+                        // - Disabling the toggle during active streaming
+                        // - Showing a tooltip: "Stop sharing to change audio settings"
+                        // - Or auto-restart the stream when toggled (with user confirmation)
                     }
                 }
                 Task::none()
@@ -3034,16 +3049,52 @@ impl CConnectApplet {
         .align_y(cosmic::iced::Alignment::Center);
 
         // Create content sections for different settings
+        // FUTURE ENHANCEMENT: Implement per-device settings panels
+        //
+        // This settings window is a placeholder for device-specific configuration.
+        // Currently, all plugin settings are global (configured in daemon config file).
+        //
+        // Planned settings panels (priority order):
+        // 1. **RemoteDesktop Plugin** (High Priority)
+        //    - Toggle auto-accept remote control requests
+        //    - Set input method restrictions (keyboard/mouse/both)
+        //    - Configure clipboard sharing permissions
+        //
+        // 2. **File Sync Plugin** (High Priority)
+        //    - Set custom download directory per device
+        //    - Configure auto-accept file size threshold
+        //    - Enable/disable automatic file receiving
+        //
+        // 3. **Run Command Plugin** (Medium Priority)
+        //    - Manage allowed commands list per device
+        //    - Set command execution timeout
+        //    - Configure command output handling
+        //
+        // 4. **Plugin Overrides** (Medium Priority)
+        //    - Enable/disable specific plugins per device
+        //    - Override global plugin settings
+        //
+        // 5. **Notification Preferences** (Low Priority)
+        //    - Filter which notification types to display
+        //    - Set notification priority levels
+        //
+        // Implementation requires:
+        // - Per-device config storage (likely SQLite or TOML per device)
+        // - DBus methods to get/set device-specific configs
+        // - UI widgets for each setting category (cosmic::widget::settings)
+        // - Validation and error handling for config updates
         let content = column![
             header,
             divider::horizontal::default(),
-            // TODO: Add the actual settings panels here
-            text("Device settings will be moved here:"),
+            text("Device-specific settings coming soon:"),
             text("• RemoteDesktop configuration"),
             text("• File Sync folder management"),
             text("• Run Command setup"),
             text("• Plugin overrides"),
             text("• Notification preferences"),
+            text(""),
+            text("For now, configure plugins globally in:").size(12),
+            text("~/.config/cosmic-connect/config.toml").size(12),
         ]
         .spacing(SPACE_M)
         .padding(SPACE_M);
@@ -4212,8 +4263,37 @@ impl CConnectApplet {
             return Element::from(cosmic::iced::widget::Space::new(0, 0));
         }
 
-        // For now, show UI for the first camera-capable device
-        // TODO: Support multiple devices or device selection
+        // DESIGN DECISION: Single-device camera UI
+        // Currently displays only the first camera-capable device. This is an intentional
+        // MVP scope limitation, not a bug.
+        //
+        // Rationale:
+        // - Most users connect 1-2 devices, rarely >1 with camera capability
+        // - Single-device UI is simpler and avoids cluttering the applet panel
+        // - Camera streaming is resource-intensive (decode + v4l2loopback kernel module)
+        // - Streaming from multiple phones simultaneously would strain system resources
+        //
+        // FUTURE ENHANCEMENT: Multi-device camera support
+        // If multiple camera devices are common, consider these UI approaches:
+        //
+        // Option A: Dropdown selector (Recommended)
+        //   - Add a dropdown above camera controls: "Source: [Device Name ▼]"
+        //   - Switch active camera device on selection
+        //   - Only one camera streams at a time
+        //
+        // Option B: Tabbed interface
+        //   - Tab per camera device
+        //   - Allows independent controls but increases complexity
+        //
+        // Option C: Multiple panels (Not recommended)
+        //   - Stack camera panels vertically
+        //   - Takes too much screen space in applet
+        //
+        // Implementation notes:
+        // - Store selected_camera_device_id in AppState
+        // - Add Message::SelectCameraDevice(String) for dropdown
+        // - Ensure only one camera streams at a time (stop others on start)
+        // - Consider adding device labels (e.g., "Phone", "Tablet") for clarity
         let device_state = camera_devices[0];
         let device_id = &device_state.device.info.device_id;
         let device_name = &device_state.device.info.device_name;

@@ -55,7 +55,12 @@
 //!     while let Some(frame) = frame_stream.next().await {
 //!         println!("Received frame: {}x{} @ {}",
 //!             frame.width, frame.height, frame.timestamp);
-//!         // TODO: Encode and stream frame
+//!
+//!         // Encode the frame (see encoder module for configuration)
+//!         // let encoded = encoder.encode_frame(&frame).await?;
+//!
+//!         // Stream to connected clients (see streaming module)
+//!         // server.broadcast_frame(encoded).await?;
 //!     }
 //!
 //!     // Stop capture

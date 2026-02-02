@@ -130,9 +130,15 @@ impl ScreenCapture {
         {
             // PipeWire source with portal fd and node
             if self.config.include_audio {
-                // TODO: Audio capture requires additional PipeWire node for audio stream
-                // XDG Desktop Portal may provide separate audio node or mixed audio+video
-                // For now, audio capture is not implemented in the pipeline
+                // Audio capture implementation approach:
+                // The XDG Desktop Portal may provide a separate PipeWire node for audio streams,
+                // or a combined audio+video stream depending on the portal implementation.
+                // To implement audio capture, the pipeline would need to:
+                // 1. Query the portal for available audio nodes (via Restore token)
+                // 2. Add a separate pipewiresrc element for the audio stream
+                // 3. Use audio encoding (e.g., opusenc) alongside video encoding
+                // 4. Multiplex audio and video into a container format (e.g., Matroska/WebM)
+                // See: https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.ScreenCast.html
                 warn!("Audio capture requested but not yet implemented in GStreamer pipeline");
                 format!(
                     "pipewiresrc fd={} path={} do-timestamp=true keepalive-time=1000 ! \

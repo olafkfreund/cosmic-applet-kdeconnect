@@ -371,13 +371,49 @@ impl CameraPlugin {
     }
 
     /// Handle camera list request
+    ///
+    /// # Camera Enumeration Implementation Notes
+    ///
+    /// To implement camera enumeration, the following approach is recommended:
+    ///
+    /// ## Linux (V4L2)
+    /// 1. Use the `v4l` crate or direct ioctl calls to enumerate `/dev/video*` devices
+    /// 2. Query device capabilities using `VIDIOC_QUERYCAP` to filter out non-capture devices
+    /// 3. Retrieve supported formats and resolutions via `VIDIOC_ENUM_FMT` and `VIDIOC_ENUM_FRAMESIZES`
+    /// 4. Build `CameraInfo` structs with:
+    ///    - `id`: Device path (e.g., "/dev/video0")
+    ///    - `name`: Device name from capabilities
+    ///    - `resolutions`: Parsed from frame size enumeration
+    ///    - `facing`: Detect from device name patterns or default to `CameraFacing::External`
+    ///    - `max_fps`: Query frame intervals via `VIDIOC_ENUM_FRAMEINTERVALS`
+    ///
+    /// ## Android
+    /// - Use `android.hardware.camera2` API
+    /// - Query `CameraManager.getCameraIdList()`
+    /// - Extract characteristics for each camera
+    ///
+    /// ## Response Format
+    /// Once implemented, send a response packet with type `cconnect.camera.list`:
+    /// ```json
+    /// {
+    ///     "type": "cconnect.camera.list",
+    ///     "body": {
+    ///         "cameras": [
+    ///             {
+    ///                 "id": "camera-0",
+    ///                 "name": "Back Camera",
+    ///                 "resolutions": ["1920x1080", "1280x720"],
+    ///                 "facing": "back",
+    ///                 "max_fps": 60
+    ///             }
+    ///         ]
+    ///     }
+    /// }
+    /// ```
     async fn handle_list_request(&self, _packet: &Packet, device: &Device) {
         info!("Received camera list request from {}", device.name());
 
-        // TODO: Enumerate available cameras
-        // This would integrate with V4L2 on Linux or platform-specific APIs
-
-        debug!("Camera list request handling not yet implemented");
+        debug!("Camera enumeration not yet implemented - see function docs for implementation approach");
     }
 
     /// Handle start camera request
@@ -515,16 +551,24 @@ impl CameraPlugin {
                     return Ok(());
                 }
 
-                // Receive payload data
-                // Note: The actual payload reception would happen through the connection layer
-                // For now, we log that we're ready to receive
+                // Payload reception integration
+                //
+                // The connection layer should receive the payload data and call
+                // `process_camera_frame_payload()` (the public API method) with
+                // the packet and payload bytes.
+                //
+                // Integration example:
+                // ```rust
+                // let payload = connection.receive_payload(payload_size).await?;
+                // camera_plugin.process_camera_frame_payload(&packet, payload).await?;
+                // ```
+                //
+                // This will internally call `handle_camera_frame_with_payload()` which
+                // decodes the frame and forwards it to the camera daemon for V4L2 output.
                 debug!(
                     "Ready to receive camera frame payload: {} bytes",
                     payload_size
                 );
-
-                // TODO: Integrate with connection layer to receive payload
-                // The payload data should be passed to handle_camera_frame_with_payload
             } else {
                 warn!("Camera frame packet missing payload size");
             }

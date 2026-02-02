@@ -182,9 +182,26 @@ async fn test_plugin_manager_battery_query() {
     let status = manager.get_device_battery_status(&device_id);
     assert!(status.is_none());
 
-    // TODO: Test receiving battery packet and querying status
-    // This requires access to device packet handling which is not
-    // exposed in the current plugin API
+    // Simulate receiving a battery packet from the remote device
+    let battery_status = battery::BatteryStatus::new(85, true, 0);
+    let battery_plugin = battery::BatteryPlugin::new();
+    let battery_packet = battery_plugin.create_battery_packet(&battery_status);
+
+    // Handle the battery packet through the plugin manager
+    let mut device_mut = device.clone();
+    manager
+        .handle_packet(&device_id, &battery_packet, &mut device_mut)
+        .await
+        .unwrap();
+
+    // Now we should be able to query the battery status
+    let status = manager.get_device_battery_status(&device_id);
+    assert!(status.is_some(), "Battery status should be available after receiving battery packet");
+
+    let status = status.unwrap();
+    assert_eq!(status.current_charge, 85, "Battery charge should match received packet");
+    assert_eq!(status.is_charging, true, "Charging status should match received packet");
+    assert_eq!(status.threshold_event, 0, "Threshold event should match received packet");
 }
 
 /// Test that plugins can be created via factories

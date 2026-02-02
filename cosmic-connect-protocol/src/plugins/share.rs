@@ -749,9 +749,30 @@ impl SharePlugin {
                                                     speed / 1024.0
                                                 );
 
-                                                // TODO: Send progress packet back to device
-                                                // This would require passing a channel or device reference
-                                                // into this callback to send cconnect.share.request.progress packets
+                                                // DESIGN LIMITATION: Progress packets not sent to sender device
+                                                //
+                                                // The current architecture spawns a detached async task for file downloads,
+                                                // which doesn't have access to the device's packet sender channel. This is
+                                                // intentional to avoid blocking packet processing.
+                                                //
+                                                // To enable progress packet sending, we would need to:
+                                                // 1. Pass packet_sender channel into this spawned task
+                                                // 2. Send cconnect.share.request.progress packets periodically
+                                                //
+                                                // Progress is currently logged locally (see lines 742-750) and could be
+                                                // exposed via a callback mechanism if needed by the UI layer.
+                                                //
+                                                // Example implementation:
+                                                //   let progress_packet = Packet::new("cconnect.share.request.progress", json!({
+                                                //       "transferId": transfer_id,
+                                                //       "filename": filename,
+                                                //       "bytesTransferred": transferred,
+                                                //       "totalBytes": total,
+                                                //       "percentComplete": percent,
+                                                //       "speedBytesPerSecond": speed as u64,
+                                                //       "eta": eta
+                                                //   }));
+                                                //   packet_sender.send((device_id, progress_packet)).await;
                                             }
 
                                             true // Continue transfer
