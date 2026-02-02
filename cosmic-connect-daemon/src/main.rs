@@ -69,6 +69,7 @@ use error_handler::ErrorHandler;
 use notification_listener::{CapturedNotification, NotificationListener};
 
 /// Main daemon state
+#[allow(clippy::type_complexity)] // Complex types needed for async shared state
 struct Daemon {
     /// Configuration (wrapped for shared access with DBus)
     config: Arc<RwLock<Config>>,
@@ -727,6 +728,7 @@ impl Daemon {
     }
 
     /// Handle a pairing event
+    #[allow(clippy::too_many_arguments)]
     async fn handle_pairing_event(
         event: PairingEvent,
         device_manager: &Arc<RwLock<DeviceManager>>,
@@ -1602,6 +1604,7 @@ impl Daemon {
     }
 
     /// Handle a connection event
+    #[allow(clippy::too_many_arguments)]
     async fn handle_connection_event(
         event: ConnectionEvent,
         device_manager: &Arc<RwLock<DeviceManager>>,
@@ -1927,13 +1930,14 @@ impl Daemon {
 
                     // Handle camera frame payload reception (Issue #139)
                     // When Android sends a camera frame, it includes payloadTransferInfo with a port
-                    // We need to connect to that port, download the frame data, and pass it to the camera plugin
+                    // We need to connect to that port with TLS, download the frame data, and pass it to the camera plugin
                     #[cfg(feature = "video")]
                     if packet.packet_type == "cconnect.camera.frame"
                         && packet.payload_transfer_info.is_some()
                         && packet.payload_size.is_some()
                     {
                         use cosmic_connect_protocol::plugins::camera::CameraPlugin;
+                        use tokio_rustls::TlsAcceptor;
 
                         let payload_info = packet.payload_transfer_info.as_ref().unwrap();
                         let payload_size = packet.payload_size.unwrap();
@@ -1941,7 +1945,7 @@ impl Daemon {
                         // Extract port from payloadTransferInfo
                         if let Some(port_value) = payload_info.get("port") {
                             if let Some(port) = port_value.as_u64() {
-                                info!(
+                                debug!(
                                     "Receiving camera frame payload: {} bytes from {}:{}",
                                     payload_size, remote_addr.ip(), port
                                 );
@@ -1951,42 +1955,57 @@ impl Daemon {
                                 let packet_clone = packet.clone();
                                 let plugin_manager_clone = plugin_manager.clone();
                                 let remote_ip = remote_addr.ip();
+                                let tls_config_clone = tls_config.clone();
 
                                 tokio::spawn(async move {
                                     // Connect to payload port on Android device
                                     let payload_addr = std::net::SocketAddr::new(remote_ip, port as u16);
 
+                                    // Android uses TLS for payload transfers with inverted roles:
+                                    // - TCP initiator (us) acts as TLS SERVER
+                                    // - TCP acceptor (Android) acts as TLS CLIENT
                                     match tokio::net::TcpStream::connect(payload_addr).await {
-                                        Ok(mut stream) => {
-                                            info!("Connected to payload port {} for camera frame", payload_addr);
+                                        Ok(tcp_stream) => {
+                                            debug!("TCP connected to payload port {} for camera frame", payload_addr);
 
-                                            // Android uses plain TCP for payload transfers
-                                            // Use read_exact to ensure all bytes are received
-                                            use tokio::io::AsyncReadExt;
+                                            // Perform TLS handshake as SERVER (inverted role per KDE Connect protocol)
+                                            let acceptor = TlsAcceptor::from(tls_config_clone.server_config());
 
-                                            let mut payload = vec![0u8; payload_size as usize];
-                                            match stream.read_exact(&mut payload).await {
-                                                Ok(_) => {
-                                                    info!("Received complete camera frame payload: {} bytes", payload_size);
+                                            match acceptor.accept(tcp_stream).await {
+                                                Ok(mut tls_stream) => {
+                                                    debug!("TLS handshake complete for camera frame payload");
 
-                                                    // Pass payload to camera plugin
-                                                    let plug_manager = plugin_manager_clone.write().await;
-                                                    if let Some(camera_plugin) = plug_manager.get_device_plugin(&device_id_clone, "camera") {
-                                                        if let Some(camera) = camera_plugin.as_any().downcast_ref::<CameraPlugin>() {
-                                                            if let Err(e) = camera.process_camera_frame_payload(&packet_clone, payload).await {
-                                                                error!("Failed to process camera frame payload: {}", e);
+                                                    // Read payload over TLS
+                                                    use tokio::io::AsyncReadExt;
+
+                                                    let mut payload = vec![0u8; payload_size as usize];
+                                                    match tls_stream.read_exact(&mut payload).await {
+                                                        Ok(_) => {
+                                                            debug!("Received complete camera frame payload: {} bytes over TLS", payload_size);
+
+                                                            // Pass payload to camera plugin
+                                                            let plug_manager = plugin_manager_clone.write().await;
+                                                            if let Some(camera_plugin) = plug_manager.get_device_plugin(&device_id_clone, "camera") {
+                                                                if let Some(camera) = camera_plugin.as_any().downcast_ref::<CameraPlugin>() {
+                                                                    if let Err(e) = camera.process_camera_frame_payload(&packet_clone, payload).await {
+                                                                        error!("Failed to process camera frame payload: {}", e);
+                                                                    } else {
+                                                                        debug!("Camera frame payload processed successfully");
+                                                                    }
+                                                                } else {
+                                                                    error!("Camera plugin not initialized for device {}", device_id_clone);
+                                                                }
                                                             } else {
-                                                                debug!("Camera frame payload processed successfully");
+                                                                error!("Failed to get camera plugin for device {}", device_id_clone);
                                                             }
-                                                        } else {
-                                                            error!("Camera plugin not initialized for device {}", device_id_clone);
                                                         }
-                                                    } else {
-                                                        error!("Failed to get camera plugin for device {}", device_id_clone);
+                                                        Err(e) => {
+                                                            error!("Failed to receive camera frame payload ({} bytes) over TLS: {}", payload_size, e);
+                                                        }
                                                     }
                                                 }
                                                 Err(e) => {
-                                                    error!("Failed to receive camera frame payload ({} bytes): {}", payload_size, e);
+                                                    error!("TLS handshake failed for camera frame payload: {}", e);
                                                 }
                                             }
                                         }

@@ -534,6 +534,7 @@ impl NotificationListener {
     }
 
     /// Parse notification parameters from DBus message
+    #[allow(clippy::type_complexity)] // DBus tuple type is inherently complex
     fn parse_notification(&self, msg: &zbus::Message) -> Result<CapturedNotification> {
         use zbus::zvariant::Value;
 
@@ -725,8 +726,10 @@ mod tests {
 
     #[test]
     fn test_truncate_body() {
-        let mut config = NotificationListenerConfig::default();
-        config.max_body_length = 10;
+        let config = NotificationListenerConfig {
+            max_body_length: 10,
+            ..Default::default()
+        };
 
         let short = "Short".to_string();
         assert_eq!(config.truncate_body(short.clone()), short);

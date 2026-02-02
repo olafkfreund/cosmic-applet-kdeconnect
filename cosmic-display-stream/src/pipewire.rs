@@ -127,6 +127,7 @@ impl PipeWireStream {
 }
 
 /// Run the `PipeWire` main loop (called from background thread)
+#[allow(clippy::needless_pass_by_value, clippy::too_many_lines)]
 fn run_pipewire_loop(
     node_id: u32,
     frame_sender: mpsc::Sender<VideoFrame>,

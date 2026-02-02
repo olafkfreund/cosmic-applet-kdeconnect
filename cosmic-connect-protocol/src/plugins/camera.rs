@@ -846,9 +846,54 @@ impl Plugin for CameraPlugin {
                         CameraSession::new(&camera_id, &resolution, fps, CameraQuality::Medium);
                     *self.session.lock().await = Some(session);
                     info!("Camera session started: {}@{} {}fps", camera_id, resolution, fps);
+
+                    // Start camera daemon for V4L2 output when Android starts streaming (Issue #139)
+                    #[cfg(feature = "video")]
+                    {
+                        // Parse resolution (format: "1280x720")
+                        let (width, height) = resolution
+                            .split_once('x')
+                            .and_then(|(w, h)| {
+                                let w_parsed = w.parse::<u32>().ok()?;
+                                let h_parsed = h.parse::<u32>().ok()?;
+                                Some((w_parsed, h_parsed))
+                            })
+                            .unwrap_or((1280, 720));
+
+                        let config = CameraDaemonConfig {
+                            device_path: std::path::PathBuf::from("/dev/video10"),
+                            width,
+                            height,
+                            fps: fps as u32,
+                            output_format: PixelFormat::YUYV,
+                            queue_size: 5,
+                            enable_perf_monitoring: true,
+                        };
+
+                        let mut daemon = CameraDaemon::new(config);
+                        if let Err(e) = daemon.start().await {
+                            error!("Failed to start camera daemon on streaming status: {}", e);
+                        } else {
+                            info!("Camera daemon started on streaming status update");
+                            *self.camera_daemon.lock().await = Some(daemon);
+                        }
+                    }
                 }
             } else {
                 // Remote stopped streaming
+                #[cfg(feature = "video")]
+                {
+                    // Stop camera daemon
+                    let mut daemon_lock = self.camera_daemon.lock().await;
+                    if let Some(daemon) = daemon_lock.as_mut() {
+                        if let Err(e) = daemon.stop().await {
+                            error!("Failed to stop camera daemon on streaming stop: {}", e);
+                        } else {
+                            info!("Camera daemon stopped on streaming stop");
+                        }
+                    }
+                    *daemon_lock = None;
+                }
                 *self.session.lock().await = None;
                 info!("Camera session ended");
             }

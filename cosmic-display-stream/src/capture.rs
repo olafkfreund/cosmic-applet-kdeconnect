@@ -321,6 +321,7 @@ impl ScreenCapture {
     /// Stop the screen capture session
     ///
     /// This will disconnect from `PipeWire` and close the portal session.
+    #[allow(clippy::unused_async)]
     pub async fn stop_capture(&mut self) -> Result<()> {
         if self.state != SessionState::Capturing {
             return Err(DisplayStreamError::StreamNotStarted);

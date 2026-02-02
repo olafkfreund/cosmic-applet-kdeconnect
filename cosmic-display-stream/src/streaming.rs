@@ -56,6 +56,7 @@
 
 use crate::encoder::EncodedFrame;
 use crate::error::{DisplayStreamError, Result};
+use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -145,6 +146,7 @@ impl StreamConfig {
     }
 
     /// Set the bind address
+    #[must_use]
     pub fn with_bind_address(mut self, address: impl Into<String>) -> Self {
         self.bind_address = address.into();
         self
@@ -158,6 +160,7 @@ impl StreamConfig {
     }
 
     /// Add a STUN server
+    #[must_use]
     pub fn with_stun_server(mut self, server: impl Into<String>) -> Self {
         self.stun_servers.push(server.into());
         self
@@ -433,6 +436,7 @@ impl StreamingServer {
     }
 
     /// Handle a signaling connection
+    #[allow(clippy::too_many_lines)]
     async fn handle_signaling_connection(
         stream: TcpStream,
         peer_addr: SocketAddr,
@@ -540,7 +544,6 @@ impl StreamingServer {
         }
 
         // Process signaling messages
-        use futures_util::StreamExt;
         while let Some(msg) = ws_receiver.next().await {
             match msg {
                 Ok(Message::Text(text)) => {

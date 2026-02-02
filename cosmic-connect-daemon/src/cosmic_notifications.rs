@@ -385,7 +385,7 @@ impl CosmicNotifier {
     /// Send a rich notification from a device
     ///
     /// Supports HTML content, images, and links.
-    #[allow(dead_code)]
+    #[allow(dead_code, clippy::too_many_arguments)]
     pub async fn notify_rich_from_device(
         &self,
         notification_id: &str,

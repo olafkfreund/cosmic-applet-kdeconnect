@@ -47,6 +47,7 @@ pub struct MessagingNotification {
     pub conversation_id: Option<String>,
 }
 
+#[allow(clippy::arc_with_non_send_sync)] // WebView is single-threaded by design
 pub struct CosmicMessages {
     core: Core,
     current_messenger: MessengerType,
@@ -73,6 +74,7 @@ impl cosmic::Application for CosmicMessages {
         &mut self.core
     }
 
+    #[allow(clippy::arc_with_non_send_sync)] // WebView is single-threaded by design
     fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Message>) {
         (
             Self {

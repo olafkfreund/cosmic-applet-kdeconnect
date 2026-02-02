@@ -468,6 +468,7 @@ impl ConnectionManager {
     /// If `remote_identity` is Some, the identity exchange has already been completed
     /// (e.g., by TLS server's accept() method for protocol v8). Otherwise, perform
     /// the identity exchange here.
+    #[allow(clippy::too_many_arguments)]
     fn spawn_connection_handler(
         mut connection: TlsConnection,
         remote_addr: SocketAddr,

@@ -29,6 +29,8 @@ open = { workspace = true }
 serde_bytes = "0.11"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 base64 = { workspace = true }
+# TLS for camera frame payload reception (Issue #139)
+tokio-rustls = "0.25"
 
 [build-dependencies]
 chrono = { workspace = true }

@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
 /// Notification preference for a device
@@ -343,7 +343,7 @@ pub struct DeviceConfigRegistry {
 
 impl DeviceConfigRegistry {
     /// Create a new device configuration registry
-    pub fn new(config_dir: &PathBuf) -> Self {
+    pub fn new(config_dir: &Path) -> Self {
         let config_path = config_dir.join("device_configs.json");
         Self {
             configs: HashMap::new(),

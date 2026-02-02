@@ -1048,6 +1048,7 @@ impl NotificationPlugin {
     ///
     /// assert_eq!(packet.packet_type, "cconnect.notification");
     /// ```
+    #[allow(clippy::too_many_arguments)]
     pub fn create_desktop_notification_packet(
         app_name: &str,
         summary: &str,

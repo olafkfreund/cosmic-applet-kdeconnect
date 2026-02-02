@@ -390,8 +390,10 @@ async fn test_transfer_size_limit_exhaustion() {
 /// Test packet queue limits
 #[tokio::test]
 async fn test_packet_queue_limit_exhaustion() {
-    let mut config = ResourceConfig::default();
-    config.max_packet_queue_size = 3;
+    let config = ResourceConfig {
+        max_packet_queue_size: 3,
+        ..Default::default()
+    };
 
     let resource_manager = ResourceManager::new(config);
 
@@ -428,8 +430,10 @@ async fn test_packet_queue_limit_exhaustion() {
 /// Test memory pressure detection
 #[tokio::test]
 async fn test_memory_pressure_detection() {
-    let mut config = ResourceConfig::default();
-    config.memory_pressure_threshold = 2000; // 2KB threshold
+    let config = ResourceConfig {
+        memory_pressure_threshold: 2000, // 2KB threshold
+        ..Default::default()
+    };
 
     let resource_manager = ResourceManager::new(config);
 

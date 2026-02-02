@@ -681,12 +681,14 @@ mod tests {
 
     #[test]
     fn test_notification_listener_config_serialization() {
-        let mut config = NotificationListenerConfig::default();
-        config.enabled = true;
-        config.excluded_apps = vec!["Spotify".to_string(), "Slack".to_string()];
-        config.included_apps = vec!["Firefox".to_string()];
-        config.include_transient = true;
-        config.max_body_length = 1500;
+        let config = NotificationListenerConfig {
+            enabled: true,
+            excluded_apps: vec!["Spotify".to_string(), "Slack".to_string()],
+            included_apps: vec!["Firefox".to_string()],
+            include_transient: true,
+            max_body_length: 1500,
+            ..Default::default()
+        };
 
         let toml_str = toml::to_string(&config).unwrap();
         let parsed: NotificationListenerConfig = toml::from_str(&toml_str).unwrap();

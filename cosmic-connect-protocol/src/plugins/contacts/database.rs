@@ -1,3 +1,7 @@
+// Allow MutexGuard held across await - we use spawn_blocking for SQLite operations
+// and the guard is intentionally held within the blocking task
+#![allow(clippy::await_holding_lock)]
+
 //! Contacts Database Storage
 //!
 //! Provides persistent storage for synchronized contacts using SQLite.

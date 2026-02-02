@@ -52,7 +52,7 @@ pub enum EncoderType {
 
 impl EncoderType {
     /// Get the `GStreamer` element name for this encoder type
-    fn element_name(&self) -> &'static str {
+    fn element_name(self) -> &'static str {
         match self {
             Self::Vaapi => "vaapih264enc",
             Self::Nvenc => "nvh264enc",
@@ -61,8 +61,8 @@ impl EncoderType {
     }
 
     /// Get a human-readable name for this encoder type
-    #[must_use] 
-    pub fn display_name(&self) -> &'static str {
+    #[must_use]
+    pub fn display_name(self) -> &'static str {
         match self {
             Self::Vaapi => "VAAPI (Intel/AMD)",
             Self::Nvenc => "NVENC (NVIDIA)",

@@ -114,6 +114,7 @@ impl AuthRequest {
     ///     "Unlock COSMIC Desktop for alice",
     /// );
     /// ```
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         request_id: impl Into<String>,
         username: impl Into<String>,

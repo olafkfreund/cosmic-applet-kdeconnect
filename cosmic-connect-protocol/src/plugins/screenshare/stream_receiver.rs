@@ -23,6 +23,12 @@ pub struct StreamReceiver {
     active_stream: Option<TcpStream>,
 }
 
+impl Default for StreamReceiver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StreamReceiver {
     /// Create a new stream receiver
     pub fn new() -> Self {

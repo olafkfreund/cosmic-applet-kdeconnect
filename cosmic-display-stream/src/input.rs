@@ -720,6 +720,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn test_touch_event_creation() {
         let event = TouchEvent::new(0.5, 0.5, TouchAction::Down, 0);
         assert_eq!(event.x, 0.5);
@@ -889,6 +890,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn test_serialization() {
         let event = TouchEvent::new(0.5, 0.5, TouchAction::Down, 0)
             .with_pressure(0.8)

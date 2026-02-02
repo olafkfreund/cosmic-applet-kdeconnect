@@ -87,6 +87,7 @@
 #![warn(clippy::all)]
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
+#![allow(clippy::missing_errors_doc)] // Error types are self-documenting via Result<T, Error>
 
 pub mod capture;
 pub mod encoder;
