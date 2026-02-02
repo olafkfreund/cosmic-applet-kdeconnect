@@ -452,7 +452,7 @@ impl Default for PluginConfig {
             enable_chat: true,        // Instant messaging enabled by default
             enable_audiostream: false, // Audio streaming disabled by default (requires audio backend)
             enable_filesync: false, // File sync disabled by default (requires file system integration)
-            enable_screenshare: false, // Screen share disabled by default (requires screen capture)
+            enable_screenshare: true, // Screen share enabled by default for desktop-to-desktop
             enable_mousekeyboardshare: false, // Mouse/keyboard share disabled by default (requires input capture)
             enable_networkshare: true,        // SFTP mounting enabled by default
             enable_camera: false,             // Camera disabled by default (opt-in feature)

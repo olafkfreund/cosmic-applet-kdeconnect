@@ -382,6 +382,10 @@ pub enum Message {
     ExecutePowerAction(String, String), // device_id, action
     // File picker
     FileSelected(String, String),
+    // Action feedback
+    ActionSuccess(String),
+    ActionError(String),
+    ClearStatusMessage,
     None,
 }
 
@@ -429,6 +433,8 @@ pub struct CosmicConnectManager {
     // Power dialog state
     show_power_dialog: bool,
     power_device_id: Option<String>,
+    // Status message for action feedback
+    status_message: Option<(String, bool)>, // (message, is_error)
 }
 
 impl CosmicConnectManager {
@@ -1759,6 +1765,7 @@ impl Application for CosmicConnectManager {
                 // Power dialog
                 show_power_dialog: false,
                 power_device_id: None,
+                status_message: None,
             },
             connect_task,
         )
@@ -2024,10 +2031,13 @@ impl Application for CosmicConnectManager {
                             Task::none()
                         }
                         DeviceAction::Screenshot => cosmic::task::future(async move {
-                            if let Err(e) = client.take_screenshot(&device_id).await {
-                                tracing::error!("Failed to take screenshot: {}", e);
+                            match client.take_screenshot(&device_id).await {
+                                Ok(()) => Message::ActionSuccess("Screenshot requested".to_string()),
+                                Err(e) => {
+                                    tracing::error!("Failed to take screenshot: {}", e);
+                                    Message::ActionError(format!("Screenshot failed: {}", e))
+                                }
                             }
-                            Message::None
                         }),
                         DeviceAction::SystemInfo => cosmic::task::future(async move {
                             if let Err(e) = client.request_system_info(&device_id).await {
@@ -2148,10 +2158,13 @@ impl Application for CosmicConnectManager {
 
                         // Desktop-only actions
                         DeviceAction::ScreenShare => cosmic::task::future(async move {
-                            if let Err(e) = client.start_screen_share(&device_id, 5000).await {
-                                tracing::error!("Failed to start screen share: {}", e);
+                            match client.start_screen_share(&device_id, 5000).await {
+                                Ok(()) => Message::ActionSuccess("Screen share started".to_string()),
+                                Err(e) => {
+                                    tracing::error!("Failed to start screen share: {}", e);
+                                    Message::ActionError(format!("Screen share failed: {}", e))
+                                }
                             }
-                            Message::None
                         }),
                         DeviceAction::Lock => cosmic::task::future(async move {
                             if let Err(e) = client.lock_device(&device_id).await {
@@ -2713,6 +2726,26 @@ impl Application for CosmicConnectManager {
                     self.power_device_id = None;
                     Task::none()
                 }
+            }
+            Message::ActionSuccess(msg) => {
+                self.status_message = Some((msg, false));
+                // Auto-clear after 3 seconds
+                cosmic::task::future(async {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    Message::ClearStatusMessage
+                })
+            }
+            Message::ActionError(msg) => {
+                self.status_message = Some((msg, true));
+                // Auto-clear after 5 seconds for errors
+                cosmic::task::future(async {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    Message::ClearStatusMessage
+                })
+            }
+            Message::ClearStatusMessage => {
+                self.status_message = None;
+                Task::none()
             }
             Message::None => Task::none(),
         }
