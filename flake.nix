@@ -185,8 +185,8 @@
           default = pkgs.callPackage ./nix/package.nix { };
 
           # nixpkgs-compatible package for submission
-          # Note: Requires manual hash updates before use
-          nixpkgs = pkgs.callPackage ./nix/pkgs/cosmic-connect.nix { };
+          # Note: Disabled until all git dependency hashes are configured
+          # nixpkgs = pkgs.callPackage ./nix/pkgs/cosmic-connect.nix { };
         };
 
         # Apps for running
