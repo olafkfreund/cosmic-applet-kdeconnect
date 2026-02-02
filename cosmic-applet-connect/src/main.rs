@@ -608,7 +608,8 @@ enum Message {
     ShowDeviceDetails(String),
     CloseDeviceDetails,
     ShowTransferQueue,
-    LaunchScreenMirror(String), // device_id
+    LaunchScreenMirror(String), // device_id - View remote's screen
+    ShareScreenTo(String),      // device_id - Share our screen to remote
 
     // Device config (used for renaming)
     DeviceConfigLoaded(String, dbus_client::DeviceConfig), // device_id, config
@@ -1871,6 +1872,35 @@ impl cosmic::Application for CConnectApplet {
                             }
                         }
                     }
+                }
+            }
+            Message::ShareScreenTo(device_id) => {
+                // Share our screen to the remote device
+                if let Some(client) = &self.dbus_client {
+                    let client = client.clone();
+                    let device_id_clone = device_id.clone();
+                    cosmic::task::future(async move {
+                        match client.share_screen_to(&device_id_clone).await {
+                            Ok(()) => {
+                                tracing::info!("Started sharing screen to {}", device_id_clone);
+                                cosmic::Action::App(Message::ShowNotification(
+                                    format!("Sharing screen to {}", device_id_clone),
+                                    NotificationType::Success,
+                                    None,
+                                ))
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to share screen: {}", e);
+                                cosmic::Action::App(Message::ShowNotification(
+                                    format!("Failed to share screen: {}", e),
+                                    NotificationType::Error,
+                                    None,
+                                ))
+                            }
+                        }
+                    })
+                } else {
+                    Task::none()
                 }
             }
             Message::CloseDeviceDetails => {
@@ -6052,6 +6082,29 @@ impl CConnectApplet {
                     Some((
                         "Accept".into(),
                         Box::new(Message::LaunchScreenMirror(device_id.to_string())),
+                    )),
+                )));
+            }
+            dbus_client::DaemonEvent::ScreenShareOutgoingRequest { device_id } => {
+                // Remote device is requesting US to share our screen with them
+                self.history.push(HistoryEvent {
+                    timestamp,
+                    event_type: "Screen Share Request".to_string(),
+                    device_name: "Unknown".to_string(),
+                    details: format!("Device {} wants to view your screen", device_id),
+                });
+
+                // Keep history bounded
+                if self.history.len() > 50 {
+                    self.history.remove(0);
+                }
+
+                return cosmic::task::message(cosmic::Action::App(Message::ShowNotification(
+                    "Remote device wants to view your screen".into(),
+                    NotificationType::Info,
+                    Some((
+                        "Share Screen".into(),
+                        Box::new(Message::ShareScreenTo(device_id.to_string())),
                     )),
                 )));
             }

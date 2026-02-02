@@ -2874,6 +2874,22 @@ async fn handle_internal_packet(dbus: &dbus::DbusServer, device_id: &str, packet
             }
             true
         }
+        "cconnect.internal.screenshare.share_requested" => {
+            // Remote device is requesting us to share our screen with them
+            let requester_name = packet
+                .body
+                .get("requester_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown");
+            info!(
+                "Screen share request from {} ({})",
+                requester_name, device_id
+            );
+            if let Err(e) = dbus.emit_screen_share_outgoing_request(device_id).await {
+                error!("Failed to emit screen_share_outgoing_request signal: {}", e);
+            }
+            true
+        }
         _ => false, // Not an internal packet
     }
 }

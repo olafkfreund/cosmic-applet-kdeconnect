@@ -105,6 +105,9 @@ fn screenshare_incoming_capabilities() -> Vec<String> {
         "cconnect.screenshare.annotation".to_string(),
         "cconnect.screenshare.stop".to_string(),
         "cconnect.screenshare.ready".to_string(),
+        // Request packet - allows remote to request us to share our screen
+        "cconnect.screenshare.request".to_string(),
+        "kdeconnect.screenshare.request".to_string(),
         // KDE Connect compatibility
         "kdeconnect.screenshare.start".to_string(),
         "kdeconnect.screenshare.frame".to_string(),
@@ -725,6 +728,40 @@ impl ScreenSharePlugin {
         }
     }
 
+    /// Request remote device to share their screen with us
+    ///
+    /// Sends a request packet asking the remote device to start sharing their screen.
+    /// If accepted by the remote, they will send a `screenshare.start` packet and
+    /// we can then open the mirror viewer to receive their stream.
+    pub async fn request_screen_share(&self) -> Result<()> {
+        if let Some(sender) = &self.packet_sender {
+            if let Some(device_id) = &self.device_id {
+                let packet = Packet::new(
+                    "cconnect.screenshare.request",
+                    serde_json::json!({
+                        "message": "Please share your screen"
+                    }),
+                );
+
+                sender
+                    .send((device_id.clone(), packet))
+                    .await
+                    .map_err(|_| {
+                        ProtocolError::Plugin("Failed to send request packet".to_string())
+                    })?;
+
+                info!("Sent screen share request to {}", device_id);
+                Ok(())
+            } else {
+                Err(ProtocolError::Plugin("No device ID set".to_string()))
+            }
+        } else {
+            Err(ProtocolError::Plugin(
+                "No packet sender available".to_string(),
+            ))
+        }
+    }
+
     /// Start streaming to a remote device (viewer)
     ///
     /// This method supports multiple viewers:
@@ -1082,7 +1119,14 @@ impl Plugin for ScreenSharePlugin {
     }
 
     fn outgoing_capabilities(&self) -> Vec<String> {
-        vec![OUTGOING_CAPABILITY.to_string()]
+        vec![
+            OUTGOING_CAPABILITY.to_string(),
+            "cconnect.screenshare.start".to_string(),
+            "cconnect.screenshare.ready".to_string(),
+            "cconnect.screenshare.stop".to_string(),
+            // Request packet - allows us to request remote to share their screen
+            "cconnect.screenshare.request".to_string(),
+        ]
     }
 
     async fn init(
@@ -1261,6 +1305,25 @@ impl Plugin for ScreenSharePlugin {
                 tcp_port,
                 self.viewer_count()
             );
+        } else if packet.is_type("cconnect.screenshare.request")
+            || packet.is_type("kdeconnect.screenshare.request")
+        {
+            // Remote device is requesting us to share our screen with them
+            info!(
+                "Received screen share request from {} - they want to view our screen",
+                device.name()
+            );
+
+            // Emit internal signal for UI to handle (show consent dialog or auto-accept)
+            self.emit_internal_packet(
+                device_id,
+                "cconnect.internal.screenshare.share_requested",
+                serde_json::json!({
+                    "requester_name": device.name(),
+                    "requester_id": device_id,
+                }),
+            )
+            .await;
         }
 
         Ok(())
@@ -1284,7 +1347,13 @@ impl PluginFactory for ScreenSharePluginFactory {
     }
 
     fn outgoing_capabilities(&self) -> Vec<String> {
-        vec![OUTGOING_CAPABILITY.to_string()]
+        vec![
+            OUTGOING_CAPABILITY.to_string(),
+            "cconnect.screenshare.start".to_string(),
+            "cconnect.screenshare.ready".to_string(),
+            "cconnect.screenshare.stop".to_string(),
+            "cconnect.screenshare.request".to_string(),
+        ]
     }
 }
 

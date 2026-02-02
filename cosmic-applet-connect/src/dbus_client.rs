@@ -344,8 +344,10 @@ pub enum DaemonEvent {
         success: bool,
         error: String,
     },
-    /// Screen share requested by remote device
+    /// Screen share requested by remote device (they want to share THEIR screen with us)
     ScreenShareRequested { device_id: String },
+    /// Screen share outgoing request (remote wants US to share our screen with them)
+    ScreenShareOutgoingRequest { device_id: String },
     /// Screen share cursor position update
     #[allow(dead_code)]
     ScreenShareCursorUpdate {
@@ -621,6 +623,12 @@ trait CConnect {
     /// Resume screen share session
     async fn resume_screen_share(&self, device_id: &str) -> zbus::fdo::Result<()>;
 
+    /// Share our screen to a remote device
+    async fn share_screen_to(&self, device_id: &str) -> zbus::fdo::Result<()>;
+
+    /// Request remote device to share their screen with us
+    async fn request_screen_share(&self, device_id: &str) -> zbus::fdo::Result<()>;
+
     /// Send screen mirror input
     async fn send_mirror_input(
         &self,
@@ -666,6 +674,10 @@ trait CConnect {
     /// Signal: Screen share requested
     #[zbus(signal)]
     fn screen_share_requested(device_id: &str) -> zbus::fdo::Result<()>;
+
+    /// Signal: Screen share outgoing request (remote wants us to share our screen)
+    #[zbus(signal)]
+    fn screen_share_outgoing_request(device_id: &str) -> zbus::fdo::Result<()>;
 
     /// Signal: Screen share started
     #[zbus(signal)]
@@ -904,6 +916,19 @@ impl DbusClient {
                 if let Ok(args) = signal.args() {
                     let device_id = args.device_id().to_string();
                     let _ = event_tx.send(DaemonEvent::ScreenShareRequested { device_id });
+                }
+            }
+        });
+
+        // Listen for outgoing screen share requests (remote wants US to share)
+        let event_tx = self.event_tx.clone();
+        let mut outgoing_share_stream =
+            self.proxy.receive_screen_share_outgoing_request().await?;
+        tokio::spawn(async move {
+            while let Some(signal) = outgoing_share_stream.next().await {
+                if let Ok(args) = signal.args() {
+                    let device_id = args.device_id().to_string();
+                    let _ = event_tx.send(DaemonEvent::ScreenShareOutgoingRequest { device_id });
                 }
             }
         });
@@ -1538,6 +1563,22 @@ impl DbusClient {
             .resume_screen_share(device_id)
             .await
             .context("Failed to call resume_screen_share")
+    }
+
+    /// Share our screen to a remote device
+    pub async fn share_screen_to(&self, device_id: &str) -> Result<()> {
+        self.proxy
+            .share_screen_to(device_id)
+            .await
+            .context("Failed to call share_screen_to")
+    }
+
+    /// Request remote device to share their screen with us
+    pub async fn request_screen_share_from(&self, device_id: &str) -> Result<()> {
+        self.proxy
+            .request_screen_share(device_id)
+            .await
+            .context("Failed to call request_screen_share")
     }
 
     /// Send screen mirror input

@@ -44,6 +44,13 @@ pub struct DeviceConfig {
     #[serde(default)]
     pub auto_accept_pairing: bool,
 
+    /// Auto-accept screen share requests from this device
+    ///
+    /// When enabled, the daemon will automatically accept incoming screen shares
+    /// without requiring the mirror UI to be pre-started.
+    #[serde(default)]
+    pub auto_accept_screenshare: bool,
+
     /// Automatically connect when device is discovered
     #[serde(default = "default_true")]
     pub auto_connect: bool,
@@ -165,6 +172,7 @@ impl DeviceConfig {
             nickname: None,
             plugins: DevicePluginConfig::default(),
             auto_accept_pairing: false,
+            auto_accept_screenshare: false,
             auto_connect: true,
             show_notifications: true,
             notification_preference: NotificationPreference::default(),

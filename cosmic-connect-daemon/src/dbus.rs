@@ -2568,6 +2568,52 @@ impl CConnectInterface {
         }
     }
 
+    /// Request remote device to share their screen with us
+    ///
+    /// Sends a request to the remote device asking them to share their screen.
+    /// If accepted by the remote, they will initiate a screen share session
+    /// and we can view their screen using the mirror app.
+    ///
+    /// # Arguments
+    /// * `device_id` - The device ID to request screen share from
+    async fn request_screen_share(&self, device_id: String) -> Result<(), zbus::fdo::Error> {
+        info!("DBus: RequestScreenShare called for {}", device_id);
+
+        // Check device is connected
+        let device_manager = self.device_manager.read().await;
+        if !device_manager
+            .get_device(&device_id)
+            .map(|d| d.is_connected())
+            .unwrap_or(false)
+        {
+            return Err(zbus::fdo::Error::Failed("Device not connected".to_string()));
+        }
+        drop(device_manager);
+
+        let plugin_manager = self.plugin_manager.read().await;
+
+        if let Some(plugin) = plugin_manager.get_device_plugin(&device_id, "screenshare") {
+            use cosmic_connect_protocol::plugins::screenshare::ScreenSharePlugin;
+
+            if let Some(screenshare) = plugin.as_any().downcast_ref::<ScreenSharePlugin>() {
+                screenshare.request_screen_share().await.map_err(|e| {
+                    zbus::fdo::Error::Failed(format!("Failed to request screen share: {}", e))
+                })?;
+
+                info!("Screen share request sent to device {}", device_id);
+                Ok(())
+            } else {
+                Err(zbus::fdo::Error::Failed(
+                    "Plugin is not ScreenSharePlugin".to_string(),
+                ))
+            }
+        } else {
+            Err(zbus::fdo::Error::Failed(
+                "ScreenShare plugin not found".to_string(),
+            ))
+        }
+    }
+
     /// Pause screen share session
     ///
     /// Pauses an active screen share session. The session remains active but
@@ -3646,9 +3692,20 @@ impl CConnectInterface {
 
     /// Signal: Screen share requested
     ///
-    /// Emitted when a remote device requests to share its screen.
+    /// Emitted when a remote device requests to share its screen with us (incoming).
+    /// The remote is offering to share their screen for us to view.
     #[zbus(signal)]
     async fn screen_share_requested(
+        signal_emitter: &SignalEmitter<'_>,
+        device_id: &str,
+    ) -> zbus::Result<()>;
+
+    /// Signal: Screen share outgoing request
+    ///
+    /// Emitted when a remote device requests us to share OUR screen with them (outgoing).
+    /// The remote wants to view our screen.
+    #[zbus(signal)]
+    async fn screen_share_outgoing_request(
         signal_emitter: &SignalEmitter<'_>,
         device_id: &str,
     ) -> zbus::Result<()>;
@@ -3985,11 +4042,23 @@ impl DbusServer {
         Ok(())
     }
 
-    /// Emit a screen_share_requested signal
+    /// Emit a screen_share_requested signal (remote wants to share their screen with us)
     pub async fn emit_screen_share_requested(&self, device_id: &str) -> Result<()> {
         let iface_ref = self.interface_ref().await?;
         CConnectInterface::screen_share_requested(iface_ref.signal_emitter(), device_id).await?;
         debug!("Emitted ScreenShareRequested signal for {}", device_id);
+        Ok(())
+    }
+
+    /// Emit a screen_share_outgoing_request signal (remote wants US to share our screen)
+    pub async fn emit_screen_share_outgoing_request(&self, device_id: &str) -> Result<()> {
+        let iface_ref = self.interface_ref().await?;
+        CConnectInterface::screen_share_outgoing_request(iface_ref.signal_emitter(), device_id)
+            .await?;
+        debug!(
+            "Emitted ScreenShareOutgoingRequest signal for {}",
+            device_id
+        );
         Ok(())
     }
 
