@@ -2963,6 +2963,24 @@ impl Daemon {
             "  - Connected devices: {}",
             device_manager.connected_count()
         );
+
+        // Create desktop icons for all paired devices at startup
+        let paired_count = device_manager.paired_count();
+        if paired_count > 0 {
+            info!("Creating desktop icons for {} paired devices...", paired_count);
+            for device in device_manager.paired_devices() {
+                if let Err(e) = desktop_icons::sync_desktop_icon(device, None) {
+                    warn!(
+                        "Failed to create desktop icon for device {}: {}",
+                        device.info.device_id, e
+                    );
+                } else {
+                    debug!("Created desktop icon for device {}", device.info.device_id);
+                }
+            }
+            info!("Desktop icons created for paired devices");
+        }
+
         drop(device_manager);
 
         info!("Daemon initialized successfully");
