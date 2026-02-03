@@ -762,16 +762,27 @@ impl ScreenSharePlugin {
                 let body = serde_json::to_value(&config).map_err(|e| {
                     ProtocolError::Plugin(format!("Failed to serialize config: {}", e))
                 })?;
-                let packet = Packet::new("cconnect.screenshare.start", body);
+
+                // Send both cconnect and kdeconnect variants for compatibility
+                // KDE Connect apps may only respond to kdeconnect.* packets
+                let cconnect_packet = Packet::new("cconnect.screenshare.start", body.clone());
+                let kdeconnect_packet = Packet::new("kdeconnect.screenshare.start", body);
 
                 sender
-                    .send((device_id.clone(), packet))
+                    .send((device_id.clone(), cconnect_packet))
                     .await
                     .map_err(|_| {
                         ProtocolError::Plugin("Failed to send start packet".to_string())
                     })?;
 
-                info!("Sent screen share start to {}", device_id);
+                sender
+                    .send((device_id.clone(), kdeconnect_packet))
+                    .await
+                    .map_err(|_| {
+                        ProtocolError::Plugin("Failed to send kdeconnect start packet".to_string())
+                    })?;
+
+                info!("Sent screen share start to {} (both cconnect and kdeconnect formats)", device_id);
                 Ok(())
             } else {
                 Err(ProtocolError::Plugin("No device ID set".to_string()))
@@ -791,21 +802,29 @@ impl ScreenSharePlugin {
     pub async fn request_screen_share(&self) -> Result<()> {
         if let Some(sender) = &self.packet_sender {
             if let Some(device_id) = &self.device_id {
-                let packet = Packet::new(
-                    "cconnect.screenshare.request",
-                    serde_json::json!({
-                        "message": "Please share your screen"
-                    }),
-                );
+                let body = serde_json::json!({
+                    "message": "Please share your screen"
+                });
+
+                // Send both cconnect and kdeconnect variants for compatibility
+                let cconnect_packet = Packet::new("cconnect.screenshare.request", body.clone());
+                let kdeconnect_packet = Packet::new("kdeconnect.screenshare.request", body);
 
                 sender
-                    .send((device_id.clone(), packet))
+                    .send((device_id.clone(), cconnect_packet))
                     .await
                     .map_err(|_| {
                         ProtocolError::Plugin("Failed to send request packet".to_string())
                     })?;
 
-                info!("Sent screen share request to {}", device_id);
+                sender
+                    .send((device_id.clone(), kdeconnect_packet))
+                    .await
+                    .map_err(|_| {
+                        ProtocolError::Plugin("Failed to send kdeconnect request packet".to_string())
+                    })?;
+
+                info!("Sent screen share request to {} (both cconnect and kdeconnect formats)", device_id);
                 Ok(())
             } else {
                 Err(ProtocolError::Plugin("No device ID set".to_string()))
