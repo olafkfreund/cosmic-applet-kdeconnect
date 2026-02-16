@@ -257,46 +257,60 @@ struct SharedCounters {
 }
 
 /// Signaling message types
+///
+/// Uses internally-tagged format with lowercase type discriminators and camelCase
+/// field names to match the Android `SignalingMessage` Kotlin sealed class.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "type", content = "data")]
+#[serde(tag = "type")]
 pub enum SignalingMessage {
     /// SDP offer from client
-    Offer(String),
+    #[serde(rename = "offer")]
+    Offer {
+        /// Session Description Protocol string
+        sdp: String,
+    },
     /// SDP answer from server
-    Answer(String),
+    #[serde(rename = "answer")]
+    Answer {
+        /// Session Description Protocol string
+        sdp: String,
+    },
     /// ICE candidate
-    IceCandidate(IceCandidateData),
+    #[serde(rename = "candidate")]
+    IceCandidate {
+        /// Candidate string
+        candidate: String,
+        /// SDP mid
+        #[serde(rename = "sdpMid")]
+        sdp_mid: Option<String>,
+        /// SDP mline index
+        #[serde(rename = "sdpMLineIndex")]
+        sdp_mline_index: Option<u16>,
+    },
     /// Client connected
+    #[serde(rename = "connected")]
     Connected {
         /// The connected client's ID
         client_id: String,
     },
     /// Client disconnected
+    #[serde(rename = "disconnected")]
     Disconnected {
         /// The disconnected client's ID
         client_id: String,
     },
     /// Error message
+    #[serde(rename = "error")]
     Error {
         /// The error message
         message: String,
     },
     /// Server ready
+    #[serde(rename = "ready")]
     Ready {
         /// The server's unique ID
         server_id: String,
     },
-}
-
-/// ICE candidate data for signaling
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct IceCandidateData {
-    /// Candidate string
-    pub candidate: String,
-    /// SDP mid
-    pub sdp_mid: Option<String>,
-    /// SDP mline index
-    pub sdp_mline_index: Option<u16>,
 }
 
 /// WebRTC streaming server
@@ -608,12 +622,12 @@ impl StreamingServer {
             let ws_sender = ws_sender_clone.clone();
             Box::pin(async move {
                 if let Some(c) = candidate {
-                    let candidate_data = IceCandidateData {
-                        candidate: c.to_json().map(|j| j.candidate).unwrap_or_default(),
-                        sdp_mid: c.to_json().ok().and_then(|j| j.sdp_mid),
-                        sdp_mline_index: c.to_json().ok().and_then(|j| j.sdp_mline_index),
+                    let json = c.to_json().ok();
+                    let msg = SignalingMessage::IceCandidate {
+                        candidate: json.as_ref().map_or_else(String::new, |j| j.candidate.clone()),
+                        sdp_mid: json.as_ref().and_then(|j| j.sdp_mid.clone()),
+                        sdp_mline_index: json.as_ref().and_then(|j| j.sdp_mline_index),
                     };
-                    let msg = SignalingMessage::IceCandidate(candidate_data);
                     let mut sender = ws_sender.lock().await;
                     let _ = Self::send_signaling_message(&mut *sender, &msg).await;
                 }
@@ -663,7 +677,7 @@ impl StreamingServer {
             match msg {
                 Ok(Message::Text(text)) => {
                     match serde_json::from_str::<SignalingMessage>(&text) {
-                        Ok(SignalingMessage::Offer(sdp)) => {
+                        Ok(SignalingMessage::Offer { sdp }) => {
                             debug!("Received offer from client {}", client_id);
 
                             // Set remote description
@@ -699,17 +713,17 @@ impl StreamingServer {
                                 })?;
 
                             // Send answer
-                            let answer_msg = SignalingMessage::Answer(answer.sdp);
+                            let answer_msg = SignalingMessage::Answer { sdp: answer.sdp };
                             let mut sender = ws_sender_ice.lock().await;
                             Self::send_signaling_message(&mut *sender, &answer_msg).await?;
                         }
-                        Ok(SignalingMessage::IceCandidate(candidate_data)) => {
+                        Ok(SignalingMessage::IceCandidate { candidate, sdp_mid, sdp_mline_index }) => {
                             debug!("Received ICE candidate from client {}", client_id);
 
                             let candidate = RTCIceCandidateInit {
-                                candidate: candidate_data.candidate,
-                                sdp_mid: candidate_data.sdp_mid,
-                                sdp_mline_index: candidate_data.sdp_mline_index,
+                                candidate,
+                                sdp_mid,
+                                sdp_mline_index,
                                 ..Default::default()
                             };
 
@@ -1129,7 +1143,7 @@ mod tests {
         };
 
         let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains("Ready"));
+        assert!(json.contains("\"type\":\"ready\""));
         assert!(json.contains("test-123"));
 
         let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
@@ -1142,19 +1156,43 @@ mod tests {
     }
 
     #[test]
-    fn test_ice_candidate_data() {
-        let data = IceCandidateData {
+    fn test_signaling_offer_format() {
+        let msg = SignalingMessage::Offer {
+            sdp: "v=0\r\n...".to_string(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"type\":\"offer\""));
+        assert!(json.contains("\"sdp\":"));
+
+        let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
+        match parsed {
+            SignalingMessage::Offer { sdp } => assert_eq!(sdp, "v=0\r\n..."),
+            _ => panic!("Wrong message type"),
+        }
+    }
+
+    #[test]
+    fn test_signaling_ice_candidate_format() {
+        let msg = SignalingMessage::IceCandidate {
             candidate: "candidate:1 1 UDP 2122262783 192.168.1.100 12345 typ host".to_string(),
             sdp_mid: Some("0".to_string()),
             sdp_mline_index: Some(0),
         };
 
-        let json = serde_json::to_string(&data).unwrap();
-        let parsed: IceCandidateData = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"type\":\"candidate\""));
+        assert!(json.contains("\"sdpMid\":"));
+        assert!(json.contains("\"sdpMLineIndex\":"));
 
-        assert_eq!(parsed.candidate, data.candidate);
-        assert_eq!(parsed.sdp_mid, data.sdp_mid);
-        assert_eq!(parsed.sdp_mline_index, data.sdp_mline_index);
+        let parsed: SignalingMessage = serde_json::from_str(&json).unwrap();
+        match parsed {
+            SignalingMessage::IceCandidate { candidate, sdp_mid, sdp_mline_index } => {
+                assert!(candidate.contains("192.168.1.100"));
+                assert_eq!(sdp_mid, Some("0".to_string()));
+                assert_eq!(sdp_mline_index, Some(0));
+            }
+            _ => panic!("Wrong message type"),
+        }
     }
 
     #[test]
