@@ -7,6 +7,7 @@ metadata:
   name: cosmic-ext-connect-desktop-app
   description: "A native version of Kde connect application for Cosmic Desktop and Cosmic applet."
   annotations:
+    backstage.io/techdocs-ref: dir:.
     github.com/project-slug: olafkfreund/cosmic-ext-connect-desktop-app
   tags: []
 spec:

@@ -1,0 +1,11 @@
+# MkDocs config for Backstage TechDocs.
+# Edit at will — Backstage rebuilds on next view.
+# https://backstage.io/docs/features/techdocs/getting-started
+
+site_name: cosmic-ext-connect-desktop-app
+site_description: A native version of Kde connect application for Cosmic Desktop and Cosmic applet.
+
+docs_dir: docs
+
+plugins:
+  - techdocs-core
